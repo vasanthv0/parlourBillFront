@@ -32,6 +32,8 @@ export interface Parlour {
   taxPercent: number;
   gstPriceMode: GstPriceMode;
   invoicePrefix: string;
+  /** When true, every service or combo on a bill must say who performed it (while the Performers page is on). Off for existing parlours. */
+  performerRequired: boolean;
 }
 
 export interface Service {
@@ -122,10 +124,20 @@ export interface Invoice extends InvoiceRow {
     unitPrice: number;
     quantity: number;
     lineTotal: number;
-    /** Who performed this line, as named on the day. Null when nobody was chosen, and on every bill made before this existed. */
+    /** Who performed this line, as named on the day, each with their share (adding up to 100). Empty when nobody was chosen, and on every bill made before performers existed. */
+    performers: InvoicePerformer[];
+    /** The one person, when exactly one performed it. Null for nobody or for a line shared between people: use `performers`. */
+    performedBy: string | null;
     performerName: string | null;
   }[];
+  /** How the tip was shared between people. Empty when it was not shared. The amounts add up to `tip`. */
+  tipShares: TipShare[];
 }
+
+/** One person on a bill line: their share of it, in percent. What they earned is never on a bill. */
+export interface InvoicePerformer { performerId: string; name: string; percent: number }
+/** One person's part of a shared tip. `percent` is only there when the tip was shared by percentage. */
+export interface TipShare { performerId: string; name: string; mode: 'fixed' | 'percent'; percent: number | null; amount: number }
 
 export interface TeamMember {
   id: string;
@@ -259,9 +271,15 @@ export interface Combo {
   /** What the same services cost separately, and what the customer saves with the combo. */
   regularPrice: number;
   savings: number;
-  /** On, and every service inside is still on the menu. */
+  /** On, inside its dates, and every service inside is still on the menu. */
   available: boolean;
+  /** Optional validity window, 'YYYY-MM-DD' on the parlour's calendar, both ends inclusive. null = no limit. */
+  startDate: string | null;
+  endDate: string | null;
+  /** Where today falls against that window (the server works it out in the parlour's time zone). Pausing is separate: see isActive. */
+  status: ComboStatus;
 }
+export type ComboStatus = 'upcoming' | 'active' | 'expired';
 
 export interface ReferralHistoryRow {
   id: string;
@@ -459,15 +477,58 @@ export interface Performer {
 
 export type CommissionKind = 'percent' | 'flat';
 
-/** A commission rule belongs to ONE person or ONE service. `value` is a percentage, or rupees for each unit performed. */
+/**
+ * Which kind of commission rule. The most specific one that applies wins, in this order (priority 1 is the highest):
+ * a person's rule for one service, the person's rule, the service's rule, the default.
+ */
+export type CommissionScope = 'performer_service' | 'performer' | 'service' | 'default';
+
+/**
+ * A commission rule is for a person and a service together, a person, a service, or nobody in particular (the default).
+ * `value` is a percentage, or rupees for each unit performed (shared by the people on a line, in proportion to their shares).
+ */
 export interface CommissionRule {
   id: string;
   kind: CommissionKind;
   value: number;
+  scope: CommissionScope;
+  /** 1 person + service, 2 person, 3 service, 4 default. The lower the number, the sooner it wins. */
+  priority: number;
+  /** A rule that is switched off is ignored for new bills. */
+  isActive: boolean;
   performerId: string | null;
   performerName: string | null;
   serviceId: string | null;
   serviceName: string | null;
+  updatedAt: string;
+}
+
+/** What was done to a rule, kept for good (it outlives the rule, the person and the service it names). */
+export interface CommissionRuleChange {
+  id: string;
+  ruleId: string | null;
+  action: 'created' | 'updated' | 'activated' | 'deactivated' | 'deleted';
+  scope: CommissionScope;
+  performerName: string | null;
+  serviceName: string | null;
+  kind: CommissionKind;
+  value: number;
+  isActive: boolean;
+  previous: { kind: CommissionKind; value: number; isActive: boolean } | null;
+  changedAt: string;
+  changedByName: string | null;
+}
+
+/** Which rule would apply to a person for a service, and what else could have. */
+export interface CommissionRuleResolution { rule: CommissionRule | null; candidates: CommissionRule[] }
+
+/** How the tips were shared in a range of days. Tips are never revenue and never commission. */
+export interface CommissionTips {
+  range: { from: string; to: string };
+  totals: { tips: number; shared: number; unshared: number };
+  people: { id: string; name: string; isActive: boolean; amount: number; bills: number }[];
+  truncated: boolean;
+  bills: { invoiceId: string; number: string; status: InvoiceStatus; createdAt: string; customerName: string; tip: number; shares: TipShare[] }[];
 }
 
 export interface CommissionPerson {
@@ -475,7 +536,7 @@ export interface CommissionPerson {
   name: string;
   isActive: boolean;
   lines: number;
-  /** Their lines' share of the bills' taxable value. */
+  /** Their part of the lines' share of the bills' taxable value (a line shared between people counts for each on their own part). */
   sales: number;
   earned: number;
   paid: number;
@@ -483,6 +544,8 @@ export interface CommissionPerson {
   due: number;
   /** Commission that was paid and then the bill was voided. Shown so the admin can settle it. */
   voidedAfterPaid: number;
+  /** Their share of tips on bills that are not void. Beside the commission, never in it. */
+  tips: number;
 }
 
 export interface CommissionReport {
@@ -494,6 +557,7 @@ export interface CommissionReport {
     paid: number;
     due: number;
     voidedAfterPaid: number;
+    tips: number;
   };
 }
 
@@ -505,10 +569,14 @@ export interface CommissionLine {
   createdAt: string;
   name: string;
   quantity: number;
-  /** Its share of the bill's taxable value: what the commission was worked out on. */
+  /** Their share of the line, in percent (100 when they did it alone). */
+  sharePercent: number;
+  /** Their part of the bill's taxable value: what the commission was worked out on. */
   base: number | null;
   kind: CommissionKind | null;
   rate: number | null;
+  /** Which kind of rule it came from, as it was that day. 'legacy' is a bill from before there were kinds. Null when no rule applied. */
+  rule: CommissionScope | 'legacy' | null;
   commission: number;
   paid: boolean;
 }
@@ -611,4 +679,144 @@ export interface Reminder {
   url: string;
   message: string;
   phone: string;
+}
+
+// ── Inventory ──────────────────────────────────────────────────────
+export type StockState = 'ok' | 'low' | 'out';
+export type MovementType = 'stock_in' | 'stock_out' | 'adjustment' | 'purchase';
+
+export interface InventoryProduct {
+  id: string;
+  name: string;
+  sku: string | null;
+  category: string | null;
+  unit: string;
+  purchasePrice: number;
+  sellingPrice: number;
+  currentStock: number;
+  minStock: number;
+  description: string | null;
+  isActive: boolean;
+  stockValue?: number;
+  retailValue?: number;
+  state?: StockState;
+}
+export interface InventoryProductInput {
+  name: string;
+  sku: string | null;
+  category: string | null;
+  unit: string;
+  purchasePrice: number;
+  sellingPrice: number;
+  minStock: number;
+  description: string | null;
+  isActive: boolean;
+}
+export interface StockMovement {
+  id: string;
+  productId: string;
+  productName: string;
+  type: MovementType;
+  quantityChange: number;
+  quantityBefore: number;
+  quantityAfter: number;
+  unitCost: number | null;
+  reason: string | null;
+  notes: string | null;
+  reference: string | null;
+  supplierName: string | null;
+  purchaseId: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+export interface PurchaseLine { productId: string; productName: string; quantity: number; unitCost: number; lineTotal: number }
+export interface InventoryPurchase {
+  id: string;
+  supplierId: string | null;
+  supplierName: string | null;
+  invoiceNumber: string | null;
+  purchaseDate: string;
+  totalAmount: number;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  itemCount?: number;
+  items?: PurchaseLine[];
+}
+export interface InventorySupplier {
+  id: string;
+  name: string;
+  contactPerson: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  gstNumber: string | null;
+  notes: string | null;
+  isActive: boolean;
+  purchases?: number;
+}
+export interface InventoryDashboard {
+  totalProducts: number;
+  stockValue: number;
+  lowStockCount: number;
+  outOfStockCount: number;
+  needsAttention: InventoryProduct[];
+  recentMovements: StockMovement[];
+  recentPurchases: InventoryPurchase[];
+}
+export interface InventoryReport<T, S = Record<string, number>> { items: T[]; meta: PageMeta; summary: S }
+export interface ValuationReport {
+  data: InventoryProduct[];
+  byCategory: { category: string; products: number; costValue: number; retailValue: number }[];
+  summary: { products: number; costValue: number; retailValue: number };
+}
+
+// ───────────── A4 tax invoice and WhatsApp sharing (Task 6) ─────────────
+
+/**
+ * The A4 invoice as the server builds it (GET /invoices/:id/a4): already worded and formatted, from what the bill saved. The A4 page
+ * draws exactly this, and the PDF and image are drawn from the same data on the server, so they cannot disagree. Nothing here is
+ * calculated in the browser: no GST, no totals.
+ */
+export interface A4Invoice {
+  version: number;
+  invoiceId: string;
+  number: string;
+  fileBaseName: string;
+  /** 'TAX INVOICE' when GST was charged or a GSTIN was saved on the bill, else 'INVOICE'. */
+  title: string;
+  status: 'paid' | 'void';
+  isVoid: boolean;
+  voidNote: string | null;
+  seller: { name: string; addressLines: string[]; phone: string | null; gstin: string | null; /** Set instead of a GSTIN on an old bill that never saved one. */ gstinNote: string | null };
+  meta: { label: string; value: string }[];
+  customer: { name: string; phone: string | null; phoneText: string };
+  lines: { no: number; name: string; detail: string | null; isCombo: boolean; sac: string | null; quantity: number; unitPrice: number; amount: number; quantityText: string; unitPriceText: string; amountText: string }[];
+  summary: { key: string; label: string; value: string; kind?: 'discount' | 'total' }[];
+  /** Only when the prices already contained GST: the part of the total that is tax. */
+  included: { heading: string; rows: { key: string; label: string; value: string }[] } | null;
+  taxTable: { mode: 'split' | 'single'; columns: string[]; row: string[]; note?: string } | null;
+  payment: { heading: string; status: 'PAID' | 'VOID'; rows: { label: string; value: string }[]; split: boolean; tip: string | null };
+  notes: string[];
+  footer: string[];
+  /** The saved figures as numbers, for checks. */
+  amounts: { subtotal: number; referralDiscount: number; discount: number; taxable: number; taxPercent: number; tax: number; cgst: number | null; sgst: number | null; total: number; tip: number };
+  /** What this invoice could not show because the bill never saved it: 'GST_SPLIT', 'GSTIN', 'CUSTOMER_PHONE'. */
+  missing: string[];
+}
+
+export type ShareKind = 'pdf' | 'image';
+
+/**
+ * What POST /invoices/:id/share/pdf|image returns. `status` is only ever 'generated': the server made the file and checked the number.
+ * `delivery.confirmed` is always false: nothing in this app can see whether WhatsApp sent, delivered or read it.
+ */
+export interface InvoiceShare {
+  kind: ShareKind;
+  status: 'generated';
+  delivery: { confirmed: false; note: string };
+  recipient: { phone: string };
+  message: string;
+  whatsappUrl: string;
+  file: { name: string; mimeType: string; sizeBytes: number; pages: number; base64: string };
 }

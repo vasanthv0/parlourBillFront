@@ -27,6 +27,7 @@ export const ADMIN_NAV: NavItem[] = [
   { path: 'customers', label: 'Customers', icon: 'users', feature: 'page.customers' },
   { path: 'services', label: 'Services', icon: 'scissors', feature: 'page.services' },
   { path: 'combos', label: 'Combos', icon: 'package', feature: 'page.combos' },
+  { path: 'inventory', label: 'Inventory', icon: 'package', feature: 'page.inventory' },
   { path: 'referrals', label: 'Referrals', icon: 'gift', feature: 'page.referrals' },
   { path: 'performers', label: 'Performers', icon: 'award', feature: 'page.performers' },
   { path: 'commissions', label: 'Commissions', icon: 'wallet', feature: 'page.commissions' },

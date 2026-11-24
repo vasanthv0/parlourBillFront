@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { GeoReading } from './geo-capture';
-import { ActivityLogFilters, Appointment, AppointmentDay, AppointmentKind, AppointmentQueue, AttendanceRecord, AttendanceSettings, CommissionKind, CommissionLines, CommissionPayout, CommissionReport, CommissionRule, Combo, Customer, DeviceType, FeatureDef, Invoice, InvoiceRow, LocationCheck, Paged, PaymentMethod, Parlour, Performer, PerformerAttendanceReport, PerformerAttendanceRecord, PerformerAttendanceResult, PerformerAttendanceToday, PerformerRecordStatus, PlatformActivityLog, PlatformParlour, PlatformSummary, Reminder, ReferralPayout, Referrer, ReferrerLookup, Role, Service, Summary, TeamMember, TodayAttendance } from './models';
+import { A4Invoice, ActivityLogFilters, Appointment, AppointmentDay, AppointmentKind, AppointmentQueue, AttendanceRecord, AttendanceSettings, CommissionKind, CommissionLines, CommissionPayout, CommissionReport, CommissionRule, CommissionRuleChange, CommissionRuleResolution, CommissionScope, CommissionTips, Combo, InventoryDashboard, InventoryProduct, InventoryProductInput, InventoryPurchase, InventorySupplier, MovementType, StockMovement, ValuationReport, Customer, DeviceType, FeatureDef, Invoice, InvoiceRow, InvoiceShare, LocationCheck, Paged, PaymentMethod, Parlour, Performer, PerformerAttendanceReport, PerformerAttendanceRecord, PerformerAttendanceResult, PerformerAttendanceToday, PerformerRecordStatus, PlatformActivityLog, PlatformParlour, PlatformSummary, Reminder, ReferralPayout, Referrer, ReferrerLookup, Role, Service, ShareKind, Summary, TeamMember, TodayAttendance } from './models';
 
 const API = environment.apiUrl;
 
@@ -23,7 +23,7 @@ const unwrapPage = <T>() => map((r: Many<T>): Paged<T> => ({ items: r.data, meta
 export class ParlourApi {
   private readonly http = inject(HttpClient);
   get(): Observable<Parlour> { return this.http.get<One<Parlour>>(`${API}/parlour`).pipe(unwrap()); }
-  update(body: Partial<Pick<Parlour, 'name' | 'phone' | 'address' | 'gstNumber' | 'taxPercent' | 'gstPriceMode' | 'invoicePrefix'>>): Observable<Parlour> {
+  update(body: Partial<Pick<Parlour, 'name' | 'phone' | 'address' | 'gstNumber' | 'taxPercent' | 'gstPriceMode' | 'invoicePrefix' | 'performerRequired'>>): Observable<Parlour> {
     return this.http.patch<One<Parlour>>(`${API}/parlour`, body).pipe(unwrap());
   }
 }
@@ -61,7 +61,15 @@ export interface NewInvoice {
   customerId?: string | null;
   walkInName?: string;
   /** Each line is one service or one combo. */
-  items: { serviceId?: string; comboId?: string; /** Who performed this line (a person from the Performers list). Left out when nobody is chosen. */ performedBy?: string; quantity: number }[];
+  items: {
+    serviceId?: string;
+    comboId?: string;
+    /** Who performed this line (a person from the Performers list). Left out when nobody is chosen. */
+    performedBy?: string;
+    /** Or several people with a percentage each, adding up to exactly 100. Never together with performedBy. */
+    performers?: { performerId: string; percent: number }[];
+    quantity: number;
+  }[];
   referrerId?: string | null;
   discount: number;
   /** How it was paid: EITHER paymentMethod (the whole bill by one method) OR payments (amounts in rupees that add up to the total). */
@@ -69,6 +77,8 @@ export interface NewInvoice {
   payments?: { method: PaymentMethod; amount: number }[];
   /** Extra money for the staff, in rupees. Left out when there is none. Not part of the total. */
   tip?: number;
+  /** How the tip is shared between people: an amount in rupees for each (adding up to the tip) or a percentage for each (adding up to 100). Left out when it is not shared. */
+  tipSplit?: { mode: 'fixed' | 'percent'; shares: { performerId: string; value: number }[] };
   notes?: string;
   /** Billing a visit from the Appointments page: the visit is closed by this bill. Left out for an ordinary bill. */
   appointmentId?: string | null;
@@ -90,6 +100,13 @@ export class InvoicesApi {
   whatsapp(id: string, phone?: string): Observable<{ url: string; message: string; phone: string }> {
     return this.http.get<One<{ url: string; message: string; phone: string }>>(`${API}/invoices/${id}/whatsapp`, { params: params({ phone }) }).pipe(unwrap());
   }
+  /** The A4 tax invoice as data, built on the server from what the bill saved. Needs no switch. */
+  a4(id: string): Observable<A4Invoice> { return this.http.get<One<A4Invoice>>(`${API}/invoices/${id}/a4`).pipe(unwrap()); }
+  /**
+   * Makes the invoice as a PDF or an image for WhatsApp, after the server has checked the customer's saved number. Each kind has its own
+   * switch on the server. The file comes back in the answer (nothing is stored); it is NOT sent anywhere: see InvoiceShare.
+   */
+  share(id: string, kind: ShareKind): Observable<InvoiceShare> { return this.http.post<One<InvoiceShare>>(`${API}/invoices/${id}/share/${kind}`, {}).pipe(unwrap()); }
   /** Admin only: everyone who has made at least one bill, for the "made by" filter. */
   makers(): Observable<{ id: string; name: string }[]> { return this.http.get<One<{ id: string; name: string }[]>>(`${API}/invoices/makers`).pipe(unwrap()); }
   void(id: string, reason: string): Observable<Invoice> { return this.http.post<One<Invoice>>(`${API}/invoices/${id}/void`, { reason }).pipe(unwrap()); }
@@ -150,10 +167,10 @@ export class PlatformApi {
 export class CombosApi {
   private readonly http = inject(HttpClient);
   list(includeInactive = false): Observable<Combo[]> { return this.http.get<One<Combo[]>>(`${API}/combos`, { params: params({ includeInactive }) }).pipe(unwrap()); }
-  create(body: { name: string; price: number; items: { serviceId: string; quantity: number }[] }): Observable<Combo> {
+  create(body: { name: string; price: number; items: { serviceId: string; quantity: number }[]; startDate?: string | null; endDate?: string | null }): Observable<Combo> {
     return this.http.post<One<Combo>>(`${API}/combos`, body).pipe(unwrap());
   }
-  update(id: string, body: { name?: string; price?: number; items?: { serviceId: string; quantity: number }[]; isActive?: boolean }): Observable<Combo> {
+  update(id: string, body: { name?: string; price?: number; items?: { serviceId: string; quantity: number }[]; isActive?: boolean; startDate?: string | null; endDate?: string | null }): Observable<Combo> {
     return this.http.patch<One<Combo>>(`${API}/combos/${id}`, body).pipe(unwrap());
   }
   remove(id: string): Observable<void> { return this.http.delete<void>(`${API}/combos/${id}`); }
@@ -205,11 +222,27 @@ export class CommissionsApi {
     return this.http.post<One<CommissionPayout>>(`${API}/commissions/pay`, body).pipe(unwrap());
   }
   rules(): Observable<CommissionRule[]> { return this.http.get<One<CommissionRule[]>>(`${API}/commissions/rules`).pipe(unwrap()); }
-  /** Sets the rule for ONE person or ONE service (adds it, or replaces the one they have). Applies to future bills only. */
-  setRule(body: { performerId?: string; serviceId?: string; kind: CommissionKind; value: number }): Observable<CommissionRule> {
+  /** Sets the rule for ONE target (adds it, or replaces the one it has). Applies to future bills only. */
+  setRule(body: { performerId?: string; serviceId?: string; scope?: CommissionScope; kind: CommissionKind; value: number; isActive?: boolean }): Observable<CommissionRule> {
     return this.http.put<One<CommissionRule>>(`${API}/commissions/rules`, body).pipe(unwrap());
   }
+  /** Adds a rule: for a person and a service, a person, a service, or (scope 'default') everybody. Refused if that target already has one. */
+  createRule(body: { performerId?: string; serviceId?: string; scope?: CommissionScope; kind: CommissionKind; value: number; isActive?: boolean }): Observable<CommissionRule> {
+    return this.http.post<One<CommissionRule>>(`${API}/commissions/rules`, body).pipe(unwrap());
+  }
+  /** Changes a rule's amount or kind, or switches it on or off. Applies to future bills only. */
+  updateRule(id: string, body: { kind?: CommissionKind; value?: number; isActive?: boolean }): Observable<CommissionRule> {
+    return this.http.patch<One<CommissionRule>>(`${API}/commissions/rules/${id}`, body).pipe(unwrap());
+  }
   removeRule(id: string): Observable<void> { return this.http.delete<void>(`${API}/commissions/rules/${id}`); }
+  /** What was done to the rules, newest first. */
+  ruleHistory(limit = 50): Observable<CommissionRuleChange[]> { return this.http.get<One<CommissionRuleChange[]>>(`${API}/commissions/rules/history`, { params: params({ limit }) }).pipe(unwrap()); }
+  /** Which rule would apply to this person for this service (leave the service out for a combo), and what else could have. */
+  resolve(performerId: string, serviceId?: string): Observable<CommissionRuleResolution> {
+    return this.http.get<One<CommissionRuleResolution>>(`${API}/commissions/rules/resolve`, { params: params({ performerId, serviceId }) }).pipe(unwrap());
+  }
+  /** How the tips were shared between people in these days. */
+  tips(range: { from?: string; to?: string }): Observable<CommissionTips> { return this.http.get<One<CommissionTips>>(`${API}/commissions/tips`, { params: params(range) }).pipe(unwrap()); }
 }
 
 /** What a check-in or check-out sends: the GPS reading, which kind of device, and (on a shared one) the person's password. */
@@ -294,4 +327,67 @@ export class AppointmentsApi {
   reminder(id: string, phone?: string): Observable<Reminder> { return this.http.get<One<Reminder>>(`${API}/appointments/${id}/reminder`, { params: params({ phone }) }).pipe(unwrap()); }
   /** Records that someone opened the reminder. */
   reminded(id: string): Observable<Appointment> { return this.http.post<One<Appointment>>(`${API}/appointments/${id}/reminded`, {}).pipe(unwrap()); }
+}
+
+type Date_ = { from?: string; to?: string };
+
+/** Inventory (admin only, and only while the Inventory page switch is on for the parlour). */
+@Injectable({ providedIn: 'root' })
+export class InventoryApi {
+  private readonly http = inject(HttpClient);
+  private readonly base = `${API}/inventory`;
+  dashboard(): Observable<InventoryDashboard> { return this.http.get<One<InventoryDashboard>>(`${this.base}/dashboard`).pipe(unwrap()); }
+  settings(): Observable<{ allowNegativeStock: boolean }> { return this.http.get<One<{ allowNegativeStock: boolean }>>(`${this.base}/settings`).pipe(unwrap()); }
+  updateSettings(allowNegativeStock: boolean): Observable<{ allowNegativeStock: boolean }> { return this.http.patch<One<{ allowNegativeStock: boolean }>>(`${this.base}/settings`, { allowNegativeStock }).pipe(unwrap()); }
+  categories(): Observable<string[]> { return this.http.get<One<string[]>>(`${this.base}/categories`).pipe(unwrap()); }
+
+  products(q: { search?: string; category?: string; status?: 'active' | 'inactive' | 'all'; stock?: 'all' | 'in' | 'low' | 'out'; page?: number; limit?: number }): Observable<Paged<InventoryProduct>> {
+    return this.http.get<Many<InventoryProduct>>(`${this.base}/products`, { params: params(q) }).pipe(unwrapPage());
+  }
+  product(id: string): Observable<InventoryProduct> { return this.http.get<One<InventoryProduct>>(`${this.base}/products/${id}`).pipe(unwrap()); }
+  createProduct(body: InventoryProductInput & { openingStock: number }): Observable<InventoryProduct> { return this.http.post<One<InventoryProduct>>(`${this.base}/products`, body).pipe(unwrap()); }
+  updateProduct(id: string, body: Partial<InventoryProductInput>): Observable<InventoryProduct> { return this.http.patch<One<InventoryProduct>>(`${this.base}/products/${id}`, body).pipe(unwrap()); }
+  deleteProduct(id: string): Observable<void> { return this.http.delete<void>(`${this.base}/products/${id}`); }
+
+  movements(q: Date_ & { productId?: string; type?: MovementType | ''; page?: number; limit?: number }): Observable<Paged<StockMovement>> {
+    return this.http.get<Many<StockMovement>>(`${this.base}/movements`, { params: params(q) }).pipe(unwrapPage());
+  }
+  stockIn(body: { productId: string; quantity: number; unitCost?: number; supplierId?: string | null; reference?: string | null; reason?: string | null; notes?: string | null }): Observable<StockMovement> {
+    return this.http.post<One<StockMovement>>(`${this.base}/stock-in`, body).pipe(unwrap());
+  }
+  stockOut(body: { productId: string; quantity: number; reason: string; reference?: string | null; notes?: string | null }): Observable<StockMovement> {
+    return this.http.post<One<StockMovement>>(`${this.base}/stock-out`, body).pipe(unwrap());
+  }
+  adjust(body: { productId: string; newQuantity?: number; change?: number; reason: string; notes?: string | null }): Observable<StockMovement> {
+    return this.http.post<One<StockMovement>>(`${this.base}/adjustments`, body).pipe(unwrap());
+  }
+
+  purchases(q: Date_ & { supplierId?: string; search?: string; page?: number; limit?: number }): Observable<Paged<InventoryPurchase> & { summary: { purchases: number; totalAmount: number } }> {
+    return this.http.get<Many<InventoryPurchase> & { summary: { purchases: number; totalAmount: number } }>(`${this.base}/purchases`, { params: params(q) })
+      .pipe(map((r) => ({ items: r.data, meta: r.meta, summary: r.summary })));
+  }
+  purchase(id: string): Observable<InventoryPurchase> { return this.http.get<One<InventoryPurchase>>(`${this.base}/purchases/${id}`).pipe(unwrap()); }
+  createPurchase(body: { supplierId?: string | null; supplierName?: string | null; invoiceNumber?: string | null; purchaseDate?: string; notes?: string | null; updatePurchasePrice: boolean; items: { productId: string; quantity: number; unitCost: number }[] }): Observable<InventoryPurchase> {
+    return this.http.post<One<InventoryPurchase>>(`${this.base}/purchases`, body).pipe(unwrap());
+  }
+
+  suppliers(includeInactive = false): Observable<InventorySupplier[]> { return this.http.get<One<InventorySupplier[]>>(`${this.base}/suppliers`, { params: params({ includeInactive }) }).pipe(unwrap()); }
+  createSupplier(body: Partial<InventorySupplier>): Observable<InventorySupplier> { return this.http.post<One<InventorySupplier>>(`${this.base}/suppliers`, body).pipe(unwrap()); }
+  updateSupplier(id: string, body: Partial<InventorySupplier>): Observable<InventorySupplier> { return this.http.patch<One<InventorySupplier>>(`${this.base}/suppliers/${id}`, body).pipe(unwrap()); }
+  deleteSupplier(id: string): Observable<void> { return this.http.delete<void>(`${this.base}/suppliers/${id}`); }
+
+  reportCurrentStock(q: { search?: string; category?: string; status?: string; page?: number; limit?: number }): Observable<Paged<InventoryProduct> & { summary: { products: number; stockValue: number } }> {
+    return this.http.get<Many<InventoryProduct> & { summary: { products: number; stockValue: number } }>(`${this.base}/reports/current-stock`, { params: params(q) })
+      .pipe(map((r) => ({ items: r.data, meta: r.meta, summary: r.summary })));
+  }
+  reportLowStock(q: { category?: string; page?: number; limit?: number }): Observable<Paged<InventoryProduct> & { summary: { products: number; outOfStock: number; lowStock: number } }> {
+    return this.http.get<Many<InventoryProduct> & { summary: { products: number; outOfStock: number; lowStock: number } }>(`${this.base}/reports/low-stock`, { params: params(q) })
+      .pipe(map((r) => ({ items: r.data, meta: r.meta, summary: r.summary })));
+  }
+  reportMovements(q: Date_ & { productId?: string; type?: MovementType | ''; page?: number; limit?: number }): Observable<Paged<StockMovement> & { summary: { quantityIn: number; quantityOut: number } }> {
+    return this.http.get<Many<StockMovement> & { summary: { quantityIn: number; quantityOut: number } }>(`${this.base}/reports/movements`, { params: params(q) })
+      .pipe(map((r) => ({ items: r.data, meta: r.meta, summary: r.summary })));
+  }
+  reportPurchases(q: Date_ & { supplierId?: string; page?: number; limit?: number }) { return this.purchases(q); }
+  reportValuation(category?: string): Observable<ValuationReport> { return this.http.get<ValuationReport>(`${this.base}/reports/valuation`, { params: params({ category }) }); }
 }

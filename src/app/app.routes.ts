@@ -37,6 +37,15 @@ const shared: Routes = [
       ),
   },
   {
+    // Task 6: the A4 tax invoice (preview and print). Admin and staff both reach it; the API limits staff to their own bills.
+    path: 'invoices/:id/a4',
+    title: 'A4 invoice',
+    loadComponent: () =>
+      import('./features/shared/invoice-a4.component').then(
+        (m) => m.InvoiceA4Component,
+      ),
+  },
+  {
     path: 'appointments',
     title: 'Appointments',
     canActivate: [featureGuard('page.appointments')],
@@ -193,6 +202,26 @@ export const routes: Routes = [
           import('./features/admin/combos.component').then(
             (m) => m.CombosComponent,
           ),
+      },
+      {
+        path: 'inventory',
+        canActivate: [featureGuard('page.inventory')],
+        loadComponent: () =>
+          import('./features/inventory/inventory-layout.component').then(
+            (m) => m.InventoryLayoutComponent,
+          ),
+        children: [
+          { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
+          { path: 'dashboard', title: 'Inventory', loadComponent: () => import('./features/inventory/inventory-dashboard.component').then((m) => m.InventoryDashboardComponent) },
+          { path: 'products', title: 'Products', loadComponent: () => import('./features/inventory/products.component').then((m) => m.ProductsComponent) },
+          { path: 'products/new', title: 'Add product', loadComponent: () => import('./features/inventory/product-form.component').then((m) => m.ProductFormComponent) },
+          { path: 'products/:id/edit', title: 'Edit product', loadComponent: () => import('./features/inventory/product-form.component').then((m) => m.ProductFormComponent) },
+          { path: 'stock', title: 'Stock in / out', loadComponent: () => import('./features/inventory/stock-movement.component').then((m) => m.StockMovementComponent) },
+          { path: 'adjustments', title: 'Stock adjustment', loadComponent: () => import('./features/inventory/stock-adjustment.component').then((m) => m.StockAdjustmentComponent) },
+          { path: 'purchases', title: 'Purchases', loadComponent: () => import('./features/inventory/purchases.component').then((m) => m.PurchasesComponent) },
+          { path: 'suppliers', title: 'Suppliers', loadComponent: () => import('./features/inventory/suppliers.component').then((m) => m.SuppliersComponent) },
+          { path: 'reports', title: 'Inventory reports', loadComponent: () => import('./features/inventory/inventory-reports.component').then((m) => m.InventoryReportsComponent) },
+        ],
       },
       {
         path: 'referrals',

@@ -13,12 +13,21 @@ import { ReferralsComponent } from './features/admin/referrals.component';
 import { ServicesComponent } from './features/admin/services.component';
 import { SettingsComponent } from './features/admin/settings.component';
 import { TeamComponent } from './features/admin/team.component';
+import { InventoryDashboardComponent } from './features/inventory/inventory-dashboard.component';
+import { InventoryReportsComponent } from './features/inventory/inventory-reports.component';
+import { ProductFormComponent } from './features/inventory/product-form.component';
+import { ProductsComponent } from './features/inventory/products.component';
+import { PurchasesComponent } from './features/inventory/purchases.component';
+import { StockAdjustmentComponent } from './features/inventory/stock-adjustment.component';
+import { StockMovementComponent } from './features/inventory/stock-movement.component';
+import { SuppliersComponent } from './features/inventory/suppliers.component';
 import { ShellComponent } from './features/shell/shell.component';
 import { AppointmentsComponent } from './features/shared/appointments.component';
 import { AccountComponent } from './features/shared/account.component';
 import { AttendanceByStaffComponent } from './features/shared/attendance-by-staff.component';
 import { AttendanceComponent } from './features/shared/attendance.component';
 import { CustomersComponent } from './features/shared/customers.component';
+import { InvoiceA4Component } from './features/shared/invoice-a4.component';
 import { InvoiceDetailComponent } from './features/shared/invoice-detail.component';
 import { InvoicesComponent } from './features/shared/invoices.component';
 import { NewBillComponent } from './features/shared/new-bill.component';
@@ -50,6 +59,8 @@ const PAGES: { name: string; component: Type<unknown>; role?: Role; heading: Reg
   { name: 'My bills', component: InvoicesComponent, role: 'staff', heading: /My bills/ },
   { name: 'Bill (admin)', component: InvoiceDetailComponent, role: 'admin', heading: /Demo Parlour/ },
   { name: 'Bill (staff)', component: InvoiceDetailComponent, role: 'staff', heading: /Demo Parlour/ },
+  { name: 'A4 invoice (admin)', component: InvoiceA4Component, role: 'admin', heading: /TAX INVOICE/ },
+  { name: 'A4 invoice (staff)', component: InvoiceA4Component, role: 'staff', heading: /TAX INVOICE/ },
   { name: 'New bill (admin)', component: NewBillComponent, role: 'admin', heading: /New bill/ },
   { name: 'New bill (staff)', component: NewBillComponent, role: 'staff', heading: /New bill/ },
   { name: 'Appointments (admin)', component: AppointmentsComponent, role: 'admin', heading: /Appointments/ },
@@ -62,6 +73,14 @@ const PAGES: { name: string; component: Type<unknown>; role?: Role; heading: Reg
   { name: 'Attendance by Staff (staff)', component: AttendanceByStaffComponent, role: 'staff', heading: /Attendance by Staff/ },
   { name: 'Parlours (platform admin)', component: ParloursComponent, role: 'super_admin', heading: /Parlours/ },
   { name: 'Parlour detail (platform admin)', component: ParlourDetailComponent, role: 'super_admin', heading: /Glow Salon/ },
+  { name: 'Inventory dashboard', component: InventoryDashboardComponent, role: 'admin', heading: /Needs attention|No products yet/ },
+  { name: 'Inventory products', component: ProductsComponent, role: 'admin', heading: /Products/ },
+  { name: 'Inventory product form', component: ProductFormComponent, role: 'admin', heading: /Add product/ },
+  { name: 'Inventory stock in/out', component: StockMovementComponent, role: 'admin', heading: /Stock in \/ out/ },
+  { name: 'Inventory adjustment', component: StockAdjustmentComponent, role: 'admin', heading: /Stock adjustment/ },
+  { name: 'Inventory purchases', component: PurchasesComponent, role: 'admin', heading: /Purchases/ },
+  { name: 'Inventory suppliers', component: SuppliersComponent, role: 'admin', heading: /Suppliers/ },
+  { name: 'Inventory reports', component: InventoryReportsComponent, role: 'admin', heading: /Reports/ },
   { name: 'Sidebar shell (admin)', component: ShellComponent, role: 'admin', heading: /Demo Parlour/ },
 ];
 
@@ -355,7 +374,9 @@ describe('a saved bill', () => {
   });
 
   it('WhatsApp button follows its switch; only admins can void', async () => {
-    const off = await open(InvoiceDetailComponent, { role: 'admin', off: ['action.whatsapp.send'] });
+    // Task 6 added two more WhatsApp buttons (the invoice as a PDF and as an image), each with its own switch: with only the text button
+    // switched off they stay (see invoice-a4.spec.ts); for "no WhatsApp anywhere" all three are off.
+    const off = await open(InvoiceDetailComponent, { role: 'admin', off: ['action.whatsapp.send', 'action.whatsapp.invoice_pdf', 'action.whatsapp.invoice_image'] });
     expect(off.text()).not.toContain('WhatsApp');
     expect(off.text()).toContain('Void bill');
     TestBed.resetTestingModule();
@@ -575,7 +596,7 @@ describe('the platform admin\'s parlour page', () => {
     const page = await open(ParlourDetailComponent, { role: 'super_admin' });
     expect(page.text()).toContain('Saved. Takes effect immediately.');
     const switches = [...page.host.querySelectorAll('[role="switch"]')] as HTMLElement[];
-    expect(switches.length).toBe(27);                                                       // 23 before Appointments, plus its page and two buttons (26), plus Attendance by Staff
+    expect(switches.length).toBe(30);                                                       // 23 before Appointments, plus its page and two buttons (26), plus Attendance by Staff, plus Inventory (28), plus the invoice PDF and image WhatsApp buttons (Task 6)
     expect(switches.some((s) => s.getAttribute('aria-checked') === 'false')).toBe(true); // Team is off in the sample parlour
     const combos = switches.find((s) => document.getElementById(s.getAttribute('aria-labelledby') ?? '')?.textContent === 'Combos')!;
     combos.click();
@@ -1073,19 +1094,19 @@ describe('the Commissions page', () => {
     await page.click(/Add rule/);
     await submit(page, '#rule-form');
     expect(page.text()).toContain('Choose a person');
-    page.http.expectNone((r) => r.method === 'PUT');
+    page.http.expectNone((r) => r.method === 'POST');
 
     await choose(page, '#r-person', 'pf2');
     await page.type('#r-value', '150');
     await submit(page, '#rule-form');
     expect(page.text()).toContain('A percentage cannot be more than 100');
-    page.http.expectNone((r) => r.method === 'PUT');
+    page.http.expectNone((r) => r.method === 'POST');
 
     await page.type('#r-value', '12.5');
     await submit(page, '#rule-form');
-    const req = page.expectOne('PUT', '/commissions/rules');
-    expect(req.request.body).toEqual({ performerId: 'pf2', kind: 'percent', value: 12.5 });
-    req.flush({ data: { id: 'cr9', kind: 'percent', value: 12.5, performerId: 'pf2', performerName: 'Asha', serviceId: null, serviceName: null } });
+    const req = page.expectOne('POST', '/commissions/rules');
+    expect(req.request.body).toEqual({ scope: 'performer', performerId: 'pf2', kind: 'percent', value: 12.5, isActive: true });
+    req.flush({ data: { id: 'cr9', kind: 'percent', value: 12.5, scope: 'performer', priority: 2, isActive: true, performerId: 'pf2', performerName: 'Asha', serviceId: null, serviceName: null, updatedAt: '2026-10-18T10:30:00.000Z' } });
     await page.settle();
     expect(html(page, 'dialog[open]')).toBeNull();
   });
@@ -1093,33 +1114,37 @@ describe('the Commissions page', () => {
   it('adds a flat amount for a service', async () => {
     const page = await open(CommissionsComponent, { role: 'admin' });
     await page.click(/Add rule/);
-    await page.click(/A service/);
+    await choose(page, '#r-scope', 'service');
     await choose(page, '#r-service', 's2');
     await page.click(/Flat amount/);
     expect(page.text()).toContain('Rupees each time it is performed');
     await page.type('#r-value', '75');
     await submit(page, '#rule-form');
-    expect(page.expectOne('PUT', '/commissions/rules').request.body).toEqual({ serviceId: 's2', kind: 'flat', value: 75 });
+    expect(page.expectOne('POST', '/commissions/rules').request.body).toEqual({ scope: 'service', serviceId: 's2', kind: 'flat', value: 75, isActive: true });
   });
 
-  it('editing shows the current rule and who it is for, and sends the change for that person', async () => {
+  it('editing shows the current rule and who it is for, and sends the change for that rule', async () => {
     const page = await open(CommissionsComponent, { role: 'admin' });
-    await page.click(/^\s*Edit/);                                                // the first rule: Meena, 10%
+    await page.click(/^\s*Edit/);                                                // the first rule (the most specific): Meena doing Haircut, 20%
     expect(page.text()).toContain('Edit commission rule');
-    expect((html(page, '#r-value') as HTMLInputElement).value).toBe('10');
-    await page.type('#r-value', '15');
+    expect(html(page, 'dialog[open]')?.textContent).toContain('Meena doing Haircut');
+    expect((html(page, '#r-value') as HTMLInputElement).value).toBe('20');
+    expect(html(page, '#r-scope')).toBeNull();                                  // who a rule is for cannot be changed
+    await page.type('#r-value', '25');
     await submit(page, '#rule-form');
-    expect(page.expectOne('PUT', '/commissions/rules').request.body).toEqual({ performerId: 'pf1', kind: 'percent', value: 15 });
+    const req = page.expectOne('PATCH', '/commissions/rules/cr4');
+    expect(req.request.body).toEqual({ kind: 'percent', value: 25, isActive: true });
+    page.http.expectNone((r) => r.method === 'PUT' || r.method === 'POST');
   });
 
   it('removing a rule asks first, and says that bills already made keep their commission', async () => {
     const page = await open(CommissionsComponent, { role: 'admin' });
     await page.click(/^\s*Remove/);
     expect(page.text()).toContain('Remove this rule?');
-    expect(page.text()).toContain('Bills already made keep the commission they earned');
+    expect(page.text()).toContain('Bills already made, and commission already paid, keep what they earned');
     page.http.expectNone((r) => r.method === 'DELETE');
     await clickIn(page, 'dialog', /Remove rule/);
-    const req = page.expectOne('DELETE', '/commissions/rules/cr1');
+    const req = page.expectOne('DELETE', '/commissions/rules/cr4');
     req.flush(null);
     await page.settle();
     expect(html(page, 'dialog[open]')).toBeNull();
@@ -1787,5 +1812,557 @@ describe('appointments: filter by person, the hour grid, and the walk-in board',
     const page = await open(AppointmentsComponent, { role: 'admin' });
     expect(page.text()).toContain('View bill DP-00001');
     expect(page.text()).not.toContain('voided');
+  });
+});
+
+// ───────────── Staff, performers, tip sharing and advanced commission ─────────────
+
+const byLabel = (page: Page, label: string) => page.host.querySelector(`[aria-label="${label}"]`) as HTMLElement | null;
+const press = async (page: Page, label: string) => {
+  const el = byLabel(page, label);
+  if (!el) throw new Error(`No control labelled "${label}". Page text: ${page.text().slice(0, 300)}`);
+  el.click();
+  await page.settle();
+};
+const typeInto = async (page: Page, label: string, value: string) => {
+  const el = byLabel(page, label) as HTMLInputElement | null;
+  if (!el) throw new Error(`No box labelled "${label}"`);
+  el.value = value;
+  el.dispatchEvent(new Event('input'));
+  await page.settle();
+};
+const pick = async (page: Page, label: string, value: string) => {
+  const el = byLabel(page, label) as HTMLSelectElement | null;
+  if (!el) throw new Error(`No choice labelled "${label}"`);
+  el.value = value;
+  el.dispatchEvent(new Event('change'));
+  await page.settle();
+};
+const saveButton = (page: Page) => [...page.host.querySelectorAll('button')].find((b) => /Save bill/.test(b.textContent ?? '')) as HTMLButtonElement;
+const shareStatus = (page: Page) => (page.host.querySelector('.shares .share-status')?.textContent ?? '').trim();
+const tipStatus = (page: Page) => (page.host.querySelector('.tip-share .share-status')?.textContent ?? '').trim();
+
+describe('billing: one service shared between several people', () => {
+  it('"Share" splits the line 50 / 50 between two people; Save waits until both are chosen, then sends the percentages (never performedBy)', async () => {
+    const page = await open(NewBillComponent, { role: 'admin' });
+    await page.click(/Massage/);
+    await pick(page, 'Performed by, Massage', 'pf1');
+    expect(page.host.querySelector('.shares')).toBeNull();
+    await press(page, 'Share Massage between people');
+    expect(page.host.querySelector('.shares')).not.toBeNull();
+    expect(page.host.querySelector('select.performer')).toBeNull();            // the single choice is replaced by the people
+    expect((byLabel(page, 'Person 1 for Massage') as HTMLSelectElement).value).toBe('pf1');      // the person already chosen stays
+    expect((byLabel(page, 'Person 2 for Massage') as HTMLSelectElement).value).toBe('');
+    expect((byLabel(page, 'Percent for person 1 on Massage') as HTMLInputElement).value).toBe('50');
+    expect((byLabel(page, 'Percent for person 2 on Massage') as HTMLInputElement).value).toBe('50');
+    expect(shareStatus(page)).toBe('Choose a person');
+    expect(saveButton(page).disabled).toBe(true);
+    page.http.expectNone((r) => r.method === 'POST');
+
+    await pick(page, 'Person 2 for Massage', 'pf2');
+    expect(shareStatus(page)).toBe('Adds up to 100%');
+    expect(saveButton(page).disabled).toBe(false);
+    await page.click(/Save bill/);
+    const body = page.expectOne('POST', '/invoices').request.body;
+    expect(body.items).toEqual([{ serviceId: 's3', performers: [{ performerId: 'pf1', percent: 50 }, { performerId: 'pf2', percent: 50 }], quantity: 1 }]);
+    expect(JSON.stringify(body)).not.toContain('performedBy');
+  });
+
+  it('percentages that do not add up to exactly 100 say what is left and block Save; "Split equally" fixes it, down to the hundredth', async () => {
+    const page = await open(NewBillComponent, { role: 'staff' });
+    await page.click(/Massage/);
+    await press(page, 'Share Massage between people');
+    await pick(page, 'Person 1 for Massage', 'pf1');
+    await pick(page, 'Person 2 for Massage', 'pf2');
+    await typeInto(page, 'Percent for person 1 on Massage', '60');
+    expect(shareStatus(page)).toBe('10% too much');
+    expect(saveButton(page).disabled).toBe(true);
+    await typeInto(page, 'Percent for person 2 on Massage', '39.99');
+    expect(shareStatus(page)).toBe('0.01% still to share');
+    expect(saveButton(page).disabled).toBe(true);
+    await typeInto(page, 'Percent for person 2 on Massage', '40.001');
+    expect(shareStatus(page)).toBe('Enter a percentage like 50 or 33.33');
+    expect(saveButton(page).disabled).toBe(true);
+    await typeInto(page, 'Percent for person 2 on Massage', '40');
+    expect(shareStatus(page)).toBe('Adds up to 100%');
+
+    // three people: equal shares add up to exactly 100 (the spare hundredth goes to the first)
+    await press(page, 'Remove person 2 from Massage');                              // back to one person: shared no more
+    expect(page.host.querySelector('.shares')).toBeNull();
+    expect((byLabel(page, 'Performed by, Massage') as HTMLSelectElement).value).toBe('pf1');
+  });
+
+  it('the same person cannot be listed twice, and "Split equally" gives each person an equal share', async () => {
+    const page = await open(NewBillComponent, { role: 'admin' });
+    await page.click(/Massage/);
+    await press(page, 'Share Massage between people');
+    await pick(page, 'Person 1 for Massage', 'pf1');
+    await pick(page, 'Person 2 for Massage', 'pf1');
+    expect(shareStatus(page)).toBe('This person is listed twice');
+    expect(saveButton(page).disabled).toBe(true);
+    await pick(page, 'Person 2 for Massage', 'pf2');
+    await page.click(/Split equally/);
+    expect((byLabel(page, 'Percent for person 1 on Massage') as HTMLInputElement).value).toBe('50');
+    expect(shareStatus(page)).toBe('Adds up to 100%');
+  });
+
+  it('a combo can be shared too; a line that is not shared still sends performedBy as it always did', async () => {
+    const page = await open(NewBillComponent, { role: 'staff' });
+    await page.click(/^\s*Combos/);
+    await page.click(/Glow Pack/);
+    await page.click(/^\s*Services/);
+    await page.click(/Facial/);
+    await pick(page, 'Performed by, Facial', 'pf2');
+    await press(page, 'Share Glow Pack between people');
+    await pick(page, 'Person 1 for Glow Pack', 'pf1');
+    await pick(page, 'Person 2 for Glow Pack', 'pf2');
+    await page.click(/Save bill/);
+    expect(page.expectOne('POST', '/invoices').request.body.items).toEqual([
+      { comboId: 'c1', performers: [{ performerId: 'pf1', percent: 50 }, { performerId: 'pf2', percent: 50 }], quantity: 1 },
+      { serviceId: 's2', performedBy: 'pf2', quantity: 1 },
+    ]);
+  });
+
+  it('removing the line, or clearing the bill, forgets how it was shared; a new bill starts fresh', async () => {
+    const page = await open(NewBillComponent, { role: 'admin' });
+    await page.click(/Massage/);
+    await press(page, 'Share Massage between people');
+    expect(page.host.querySelector('.shares')).not.toBeNull();
+    await page.click(/Clear bill/);
+    expect(page.host.querySelector('.shares')).toBeNull();
+    await page.click(/Massage/);
+    expect(page.host.querySelector('.shares')).toBeNull();
+    expect((byLabel(page, 'Performed by, Massage') as HTMLSelectElement).value).toBe('');
+  });
+
+  it('changing how a line is shared is a different bill, so it gets its own idempotency key', async () => {
+    const page = await open(NewBillComponent, { role: 'admin' });
+    await page.click(/Massage/);
+    await press(page, 'Share Massage between people');
+    await pick(page, 'Person 1 for Massage', 'pf1');
+    await pick(page, 'Person 2 for Massage', 'pf2');
+    await page.click(/Save bill/);
+    const first = page.expectOne('POST', '/invoices');
+    first.flush({ error: { code: 'X', message: 'Try again' } }, { status: 500, statusText: 'Server Error' });
+    await page.settle();
+    await page.click(/Save bill/);
+    const same = page.expectOne('POST', '/invoices');
+    expect(same.request.headers.get('Idempotency-Key')).toBe(first.request.headers.get('Idempotency-Key'));
+    same.flush({ error: { code: 'X', message: 'Try again' } }, { status: 500, statusText: 'Server Error' });
+    await page.settle();
+    await typeInto(page, 'Percent for person 1 on Massage', '70');
+    await typeInto(page, 'Percent for person 2 on Massage', '30');
+    await page.click(/Save bill/);
+    expect(page.expectOne('POST', '/invoices').request.headers.get('Idempotency-Key')).not.toBe(first.request.headers.get('Idempotency-Key'));
+  });
+
+  it('with the Performers page switched off nobody can be chosen or shared with', async () => {
+    const page = await open(NewBillComponent, { role: 'admin', off: ['page.performers'] });
+    await page.click(/Massage/);
+    expect(byLabel(page, 'Share Massage between people')).toBeNull();
+    expect(page.host.querySelector('.shares')).toBeNull();
+  });
+});
+
+describe('billing: a performer made compulsory', () => {
+  it('Save is blocked, and the lines that still need someone are named, until each has a performer; discount and tip never need one', async () => {
+    const page = await open(NewBillComponent, { role: 'staff', parlour: { performerRequired: true } });
+    await page.click(/Massage/);
+    await page.click(/Facial/);
+    expect(saveButton(page).disabled).toBe(true);
+    expect(page.text()).toContain('Choose who performed: Massage, Facial');
+    expect(page.text()).toContain('Choose who performed this');
+    page.http.expectNone((r) => r.method === 'POST');
+    await pick(page, 'Performed by, Massage', 'pf1');
+    // a line added next starts with the person chosen last, so Facial has pf1 too; blank it again to see only one line named
+    await pick(page, 'Performed by, Facial', '');
+    expect(page.text()).toContain('Choose who performed: Facial');
+    expect(page.text()).not.toContain('Choose who performed: Massage');
+    await pick(page, 'Performed by, Facial', 'pf2');
+    expect(page.text()).not.toContain('Choose who performed');
+    expect(saveButton(page).disabled).toBe(false);
+    await page.type('#tip', '20');
+    expect(saveButton(page).disabled).toBe(false);
+  });
+
+  it('a line shared between people counts as having performers', async () => {
+    const page = await open(NewBillComponent, { role: 'admin', parlour: { performerRequired: true } });
+    await page.click(/Massage/);
+    expect(saveButton(page).disabled).toBe(true);
+    await press(page, 'Share Massage between people');
+    await pick(page, 'Person 1 for Massage', 'pf1');
+    await pick(page, 'Person 2 for Massage', 'pf2');
+    expect(page.text()).not.toContain('Choose who performed');
+    expect(saveButton(page).disabled).toBe(false);
+  });
+
+  it('nothing is demanded when it is off (as it always was)', async () => {
+    const off = await open(NewBillComponent, { role: 'staff' });
+    await off.click(/Massage/);
+    expect(saveButton(off).disabled).toBe(false);
+    expect(off.text()).not.toContain('Choose who performed');
+  });
+
+  it('nothing is demanded when the Performers page is switched off, so nobody can be chosen', async () => {
+    const pageOff = await open(NewBillComponent, { role: 'staff', parlour: { performerRequired: true }, off: ['page.performers'] });
+    await pageOff.click(/Massage/);
+    expect(saveButton(pageOff).disabled).toBe(false);
+    expect(pageOff.text()).not.toContain('Choose who performed');
+  });
+
+  it('if the server still refuses (someone else just switched it on), the bill is kept as it was so it can be fixed and saved again', async () => {
+    const page = await open(NewBillComponent, { role: 'admin' });
+    await page.click(/Massage/);
+    await page.click(/Save bill/);
+    page.expectOne('POST', '/invoices').flush({ error: { code: 'PERFORMER_REQUIRED', message: 'Choose who performed: Massage', details: { items: 'Choose who performed: Massage' } } }, { status: 400, statusText: 'Bad Request' });
+    await page.settle();
+    expect(page.host.querySelectorAll('li.receipt-line').length).toBe(1);
+    expect(saveButton(page).disabled).toBe(false);
+    await pick(page, 'Performed by, Massage', 'pf2');
+    await page.click(/Save bill/);
+    expect(page.expectOne('POST', '/invoices').request.body.items).toEqual([{ serviceId: 's3', performedBy: 'pf2', quantity: 1 }]);
+  });
+});
+
+describe('billing: sharing a tip between people', () => {
+  const withTip = async (opts: Parameters<typeof open>[1] = { role: 'admin' }) => {
+    const page = await open(NewBillComponent, opts);
+    await page.click(/Massage/);
+    await pick(page, 'Performed by, Massage', 'pf1');
+    await page.type('#tip', '500');
+    return page;
+  };
+
+  it('is offered only when there is a tip, and is "not shared" until chosen: the bill is sent exactly as before', async () => {
+    const page = await open(NewBillComponent, { role: 'admin' });
+    await page.click(/Massage/);
+    expect(page.host.querySelector('.tip-share')).toBeNull();                       // no tip yet
+    await page.type('#tip', '500');
+    expect(page.host.querySelector('.tip-share')).not.toBeNull();
+    expect(page.text()).toContain('Share the tip');
+    await page.click(/Save bill/);
+    const body = page.expectOne('POST', '/invoices').request.body;
+    expect(body.tip).toBe(500);
+    expect('tipSplit' in body).toBe(false);
+  });
+
+  it('by amount: ₹500 between two people; it says what is left, blocks Save until it adds up, and sends the amounts', async () => {
+    const page = await withTip();
+    await page.click(/By amount/);
+    // starts with the people on the bill, equally (here, the one person chosen)
+    expect((byLabel(page, 'Tip: person 1') as HTMLSelectElement).value).toBe('pf1');
+    expect((byLabel(page, 'Tip amount for person 1') as HTMLInputElement).value).toBe('500');
+    expect(tipStatus(page)).toBe('Adds up to the tip');
+    await page.click(/^\s*Add person/);
+    await pick(page, 'Tip: person 2', 'pf2');
+    expect(tipStatus(page)).toBe('Enter an amount like 250 or 99.50');             // person 2 has no amount yet
+    await typeInto(page, 'Tip amount for person 1', '250');
+    await typeInto(page, 'Tip amount for person 2', '100');
+    expect(tipStatus(page)).toBe('₹150 still to share');
+    expect(saveButton(page).disabled).toBe(true);
+    await typeInto(page, 'Tip amount for person 2', '251');
+    expect(tipStatus(page)).toBe('₹1 too much');
+    expect(saveButton(page).disabled).toBe(true);
+    page.http.expectNone((r) => r.method === 'POST');
+    await typeInto(page, 'Tip amount for person 2', '250');
+    expect(tipStatus(page)).toBe('Adds up to the tip');
+    expect(saveButton(page).disabled).toBe(false);
+    await page.click(/Save bill/);
+    const body = page.expectOne('POST', '/invoices').request.body;
+    expect(body.tip).toBe(500);
+    expect(body.tipSplit).toEqual({ mode: 'fixed', shares: [{ performerId: 'pf1', value: 250 }, { performerId: 'pf2', value: 250 }] });
+  });
+
+  it('by percentage: they must add up to 100; "Split equally" shares the tip down to the paisa', async () => {
+    const page = await withTip();
+    await page.click(/By percentage/);
+    expect((byLabel(page, 'Tip percent for person 1') as HTMLInputElement).value).toBe('100');
+    await page.click(/^\s*Add person/);
+    await pick(page, 'Tip: person 2', 'pf2');
+    await typeInto(page, 'Tip percent for person 1', '50');
+    await typeInto(page, 'Tip percent for person 2', '49');
+    expect(tipStatus(page)).toBe('1% still to share');
+    expect(saveButton(page).disabled).toBe(true);
+    await page.click(/Split equally/);
+    expect(tipStatus(page)).toBe('Adds up to 100%');
+    await page.click(/Save bill/);
+    expect(page.expectOne('POST', '/invoices').request.body.tipSplit).toEqual({ mode: 'percent', shares: [{ performerId: 'pf1', value: 50 }, { performerId: 'pf2', value: 50 }] });
+  });
+
+  it('by amount, an odd tip is split to the paisa, the spare going to the first person', async () => {
+    const page = await open(NewBillComponent, { role: 'admin' });
+    await page.click(/Massage/);
+    await pick(page, 'Performed by, Massage', 'pf1');
+    await page.type('#tip', '100.01');
+    await page.click(/By amount/);
+    await page.click(/^\s*Add person/);
+    await pick(page, 'Tip: person 2', 'pf2');
+    await page.click(/Split equally/);
+    expect((byLabel(page, 'Tip amount for person 1') as HTMLInputElement).value).toBe('50.01');
+    expect((byLabel(page, 'Tip amount for person 2') as HTMLInputElement).value).toBe('50');
+    expect(tipStatus(page)).toBe('Adds up to the tip');
+  });
+
+  it('the same person twice, nobody chosen, and a changed tip each block Save; "Not shared" sends no split and forgets nothing about the tip', async () => {
+    const page = await withTip();
+    await page.click(/By amount/);
+    await page.click(/^\s*Add person/);
+    await pick(page, 'Tip: person 2', 'pf1');
+    expect(tipStatus(page)).toBe('This person is listed twice');
+    expect(saveButton(page).disabled).toBe(true);
+    await pick(page, 'Tip: person 2', '');
+    expect(tipStatus(page)).toBe('Choose a person');
+    // the tip changes after it was shared: the amounts no longer add up
+    await press(page, 'Remove tip person 2');
+    expect(tipStatus(page)).toBe('Adds up to the tip');
+    await page.type('#tip', '400');
+    expect(tipStatus(page)).toBe('₹100 too much');
+    expect(saveButton(page).disabled).toBe(true);
+    await page.type('#tip', '600');
+    expect(tipStatus(page)).toBe('₹100 still to share');
+    await page.click(/Not shared/);
+    expect(saveButton(page).disabled).toBe(false);
+    await page.click(/Save bill/);
+    const body = page.expectOne('POST', '/invoices').request.body;
+    expect(body.tip).toBe(600);
+    expect('tipSplit' in body).toBe(false);
+  });
+
+  it('a tip cleared back to nothing leaves nothing to share; Clear bill forgets the whole split', async () => {
+    const page = await withTip();
+    await page.click(/By amount/);
+    await page.type('#tip', '0');
+    expect(page.host.querySelector('.tip-share')).toBeNull();
+    expect(saveButton(page).disabled).toBe(false);
+    await page.type('#tip', '500');
+    expect((byLabel(page, 'Tip amount for person 1') as HTMLInputElement | null)?.value).toBe('500');     // still as it was
+    await page.click(/Clear bill/);
+    await page.click(/Massage/);
+    await page.type('#tip', '500');
+    expect(page.text()).toContain('Not shared');
+    expect(byLabel(page, 'Tip amount for person 1')).toBeNull();
+  });
+
+  it('is not offered without the Tip box', async () => {
+    const noTip = await open(NewBillComponent, { role: 'admin', off: ['action.payments.tip'] });
+    await noTip.click(/Massage/);
+    expect(noTip.host.querySelector('.tip-share')).toBeNull();
+  });
+
+  it('is not offered without the Performers page (sharing names people), though the tip itself still works', async () => {
+    const noPeople = await open(NewBillComponent, { role: 'admin', off: ['page.performers'] });
+    await noPeople.click(/Massage/);
+    await noPeople.type('#tip', '500');
+    expect(noPeople.host.querySelector('.tip-share')).toBeNull();
+    await noPeople.click(/Save bill/);
+    const body = noPeople.expectOne('POST', '/invoices').request.body;
+    expect(body.tip).toBe(500);
+    expect('tipSplit' in body).toBe(false);
+  });
+
+  it('a split paid across methods can share its tip too', async () => {
+    const page = await withTip();
+    await page.click(/By percentage/);
+    await page.click(/Save bill/);
+    expect(page.expectOne('POST', '/invoices').request.body.tipSplit).toEqual({ mode: 'percent', shares: [{ performerId: 'pf1', value: 100 }] });
+  });
+});
+
+describe('Settings: the performer is compulsory', () => {
+  it('shows what is saved, explains the change before it is saved, and sends it', async () => {
+    const page = await open(SettingsComponent, { role: 'admin' });
+    const box = html(page, '#performer-required') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(page.text()).toContain('Every service on a bill must say who performed it');
+    expect(page.text()).not.toContain('cannot be saved until someone is chosen');
+    box.click(); await page.settle();
+    expect(page.text()).toContain('a service or combo cannot be saved until someone is chosen');
+    expect(page.text()).toContain('Discounts, GST and tips never need one');
+    expect(page.text()).toContain('Bills already made do not change');
+    await page.click(/Save settings/);
+    const req = page.expectOne('PATCH', '/parlour');
+    expect(req.request.body.performerRequired).toBe(true);
+    req.flush({ data: {} });
+    await page.settle();
+    expect(page.text()).not.toContain('Bills already made do not change');
+  });
+
+  it('opens showing it on when the parlour has it on', async () => {
+    const on = await open(SettingsComponent, { role: 'admin', parlour: { performerRequired: true } });
+    expect((html(on, '#performer-required') as HTMLInputElement).checked).toBe(true);
+    expect(on.text()).not.toContain('Bills already made do not change');
+  });
+
+  it('the server\'s refusal (nobody to choose yet) shows next to the setting', async () => {
+    const page = await open(SettingsComponent, { role: 'admin' });
+    (html(page, '#performer-required') as HTMLInputElement).click(); await page.settle();
+    await page.click(/Save settings/);
+    page.expectOne('PATCH', '/parlour').flush({ error: { code: 'NO_PERFORMERS_YET', message: 'Add at least one active person on the Performers page before making the performer compulsory.', details: { performerRequired: 'Add a performer first' } } }, { status: 400, statusText: 'Bad Request' });
+    await page.settle();
+    expect(page.text()).toContain('Add a performer first');
+  });
+});
+
+describe('the invoice: who performed each line, and how the tip was shared', () => {
+  it('a line shared between people lists each with their percentage', async () => {
+    const page = await open(InvoiceDetailComponent, { role: 'admin', invoiceKind: 'shared' });
+    expect(page.text()).toMatch(/Performed by\s*Meena 60%\s*·\s*Asha 40%/);
+    expect(page.text()).not.toContain('Performed by Meena 100');
+  });
+
+  it('a line one person performed still says "Performed by", with no percentage', async () => {
+    const solo = await open(InvoiceDetailComponent, { role: 'admin', invoiceKind: 'split' });
+    expect(solo.text()).toContain('Performed by Meena');
+    expect(solo.text()).not.toMatch(/Meena 100/);
+  });
+
+  it('shows how the tip was shared, apart from the total, and leaves both off the printed receipt', async () => {
+    const page = await open(InvoiceDetailComponent, { role: 'admin', invoiceKind: 'shared' });
+    expect(page.text()).toMatch(/Tip ₹500(\.00)?: extra, not included in the total above/);
+    expect(page.text()).toContain('Tip shared: Meena ₹300');
+    expect(page.text()).toContain('Asha ₹200');
+    const marked = [...page.host.querySelectorAll('.tip-shares, .performers')];
+    expect(marked.length).toBe(2);
+    for (const el of marked) expect(el.classList.contains('no-print')).toBe(true);
+  });
+
+  it('a bill whose tip was not shared says nothing about sharing', async () => {
+    const plain = await open(InvoiceDetailComponent, { role: 'admin', invoiceKind: 'parts' });
+    expect(plain.text()).not.toContain('Tip shared');
+  });
+
+  it('staff see the same, and never what anyone earned', async () => {
+    const page = await open(InvoiceDetailComponent, { role: 'staff', invoiceKind: 'shared' });
+    expect(page.text()).toContain('Performed by Meena 60%');
+    expect(page.text().toLowerCase()).not.toContain('commission');
+  });
+});
+
+describe('the Commissions page: rules, priority, history and tips', () => {
+  it('lists every rule most specific first, with its priority, who it is for and whether it is on', async () => {
+    const page = await open(CommissionsComponent, { role: 'admin' });
+    const rows = [...page.host.querySelectorAll('section[aria-labelledby="rules-h"] tbody tr')].map((r) => (r.textContent ?? '').replace(/\s+/g, ' ').trim());
+    expect(rows.length).toBe(5);
+    expect(rows[0]).toContain('1 · Person + service');
+    expect(rows[0]).toContain('Meena doing Haircut');
+    expect(rows[0]).toContain('20% of what the service took in');
+    expect(rows[1]).toContain('2 · Person');
+    expect(rows[2]).toContain('3 · Service');
+    expect(rows[2]).toContain('₹50 each time it is performed');
+    expect(rows[3]).toContain('4 · Default');
+    expect(rows[3]).toContain('Everybody (default)');
+    expect(rows[0]).toContain('Active');
+    expect(rows[4]).toContain('Facial');
+    expect(rows[4]).toContain('Off');
+    expect(page.text()).toContain('1 person + service, 2 person, 3 service, 4 default');
+    expect(page.text()).toContain('bills already made, and commission already paid, keep theirs');
+  });
+
+  it('adds the default for everybody, which needs neither a person nor a service', async () => {
+    const page = await open(CommissionsComponent, { role: 'admin' });
+    await page.click(/Add rule/);
+    await choose(page, '#r-scope', 'default');
+    expect(html(page, '#r-person')).toBeNull();
+    expect(html(page, '#r-service')).toBeNull();
+    await page.type('#r-value', '5');
+    await submit(page, '#rule-form');
+    expect(page.expectOne('POST', '/commissions/rules').request.body).toEqual({ scope: 'default', kind: 'percent', value: 5, isActive: true });
+  });
+
+  it('adds a rule for a person doing one service: both must be chosen, and both are sent', async () => {
+    const pair = await open(CommissionsComponent, { role: 'admin' });
+    await pair.click(/Add rule/);
+    await choose(pair, '#r-scope', 'performer_service');
+    await pair.type('#r-value', '20');
+    await submit(pair, '#rule-form');
+    expect(pair.text()).toContain('Choose a person');
+    expect(pair.text()).toContain('Choose a service');
+    pair.http.expectNone((r) => r.method === 'POST');
+    await choose(pair, '#r-person', 'pf1');
+    await choose(pair, '#r-service', 's3');
+    await submit(pair, '#rule-form');
+    expect(pair.expectOne('POST', '/commissions/rules').request.body).toEqual({ scope: 'performer_service', performerId: 'pf1', serviceId: 's3', kind: 'percent', value: 20, isActive: true });
+  });
+
+  it('a rule that already exists is refused by the server and the message is shown in the dialog', async () => {
+    const page = await open(CommissionsComponent, { role: 'admin' });
+    await page.click(/Add rule/);
+    await choose(page, '#r-person', 'pf1');
+    await page.type('#r-value', '5');
+    await submit(page, '#rule-form');
+    page.expectOne('POST', '/commissions/rules').flush({ error: { code: 'RULE_EXISTS', message: 'There is already a rule for this. Edit that rule instead.' } }, { status: 409, statusText: 'Conflict' });
+    await page.settle();
+    expect(page.text()).toContain('There is already a rule for this. Edit that rule instead.');
+  });
+
+  it('"Switch off" and "Switch on" change only whether the rule is used, and say it applies to new bills', async () => {
+    const page = await open(CommissionsComponent, { role: 'admin' });
+    await page.click(/Switch off/);
+    const off = page.expectOne('PATCH', '/commissions/rules/cr4');
+    expect(off.request.body).toEqual({ isActive: false });
+    page.http.expectNone((r) => r.method === 'PUT' || r.method === 'POST' || r.method === 'DELETE');
+  });
+
+  it('"Switch on" sends only the on/off change for a rule that is off', async () => {
+    const on = await open(CommissionsComponent, { role: 'admin' });
+    await on.click(/Switch on/);
+    expect(on.expectOne('PATCH', '/commissions/rules/cr5').request.body).toEqual({ isActive: true });
+  });
+
+  it('editing a switched-off rule shows it unticked, and the rule history lists what was done, with the old and new values', async () => {
+    const page = await open(CommissionsComponent, { role: 'admin' });
+    const edits = [...page.host.querySelectorAll('section[aria-labelledby="rules-h"] tbody tr')][4].querySelector('button') as HTMLButtonElement;
+    edits.click(); await page.settle();
+    expect((page.host.querySelector('dialog input[type=checkbox]') as HTMLInputElement).checked).toBe(false);
+    await clickIn(page, 'dialog', /Cancel/);
+    expect(page.text()).not.toContain('Changed from');
+    await page.click(/Show rule history/);
+    expect(page.text()).toContain('Changed from 15% of what the service took in to 20% of what the service took in');
+    expect(page.text()).toContain('Switched off');
+    expect(page.text()).toContain('Olive Owner');
+  });
+
+  it('"Which rule applies?" explains the winner and what else could have applied', async () => {
+    const page = await open(CommissionsComponent, { role: 'admin' });
+    await page.click(/Which rule applies/);
+    await choose(page, '#q-person', 'pf1');
+    await choose(page, '#q-service', 's1');
+    await clickIn(page, 'dialog', /^\s*Check/);                                  // (a read: the test harness answers it)
+    expect(page.text()).toContain('20% of what the service took in');
+    expect(page.text()).toContain('priority 1');
+    expect(page.text()).toContain('← used');
+    expect(page.text()).toContain('4 · Default: Everybody (default)');
+    expect(page.text()).toContain('3 · Service: Massage');
+  });
+
+  it('the people table has a Tips column, and a shared line shows the person\'s share, their part, and which rule it came from', async () => {
+    const page = await open(CommissionsComponent, { role: 'admin' });
+    expect([...page.host.querySelectorAll('th')].some((th) => /Tips/.test(th.textContent ?? ''))).toBe(true);
+    expect(page.text()).toContain('Tips shared');
+    await page.click(/Show bills/);
+    for (const text of ['Their share', '60%', '20% · Person + service', '5% · Default', '10% · Earlier rule', '10% · Person', '₹50 each · Service', 'No rule']) {
+      expect(page.text()).toContain(text);
+    }
+  });
+
+  it('the tips panel shows what was given to whom, and which bills; tips are never added to commission', async () => {
+    const page = await open(CommissionsComponent, { role: 'admin' });
+    expect(page.text()).toContain('₹540.00 in tips');
+    expect(page.text()).toContain('₹500.00 given to people');
+    expect(page.text()).toContain('₹40.00 not shared with anyone');
+    expect(page.text()).toContain('not sales, not commission');
+    await page.click(/Show the 2 bills with a tip/);
+    expect(page.text()).toContain('DP-00001');
+    expect(page.text()).toContain('Meena ₹300');
+    expect(page.text()).toContain('Asha ₹200');
+    expect(page.text()).toContain('(40%)');
+    expect(page.text()).toContain('Not shared');
+    const r = (page.host.querySelectorAll('.ledger-item')[1] as HTMLElement | undefined)?.textContent ?? '';
+    expect(r).not.toContain('540');
+  });
+
+  it('with no tips in the period the panel says so; if only the tips fail to load, the commission report still shows', async () => {
+    const page = await open(CommissionsComponent, { role: 'admin', empty: true });
+    expect(page.text()).toContain('No tips were recorded in this period');
   });
 });

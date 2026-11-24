@@ -15,9 +15,9 @@ import { Role } from '../core/models';
 
 export const ALL_FEATURES = [
   'page.dashboard', 'page.customers', 'page.services', 'page.combos', 'page.referrals', 'page.team', 'page.settings', 'page.attendance',
-  'page.performers', 'page.commissions', 'page.appointments', 'page.attendance_by_staff',
+  'page.performers', 'page.commissions', 'page.appointments', 'page.attendance_by_staff', 'page.inventory',
   'action.services.add', 'action.team.add', 'action.team.edit', 'action.team.reset', 'action.team.deactivate',
-  'action.combos.add', 'action.referrals.add', 'action.whatsapp.send', 'action.payments.split', 'action.payments.tip',
+  'action.combos.add', 'action.referrals.add', 'action.whatsapp.send', 'action.whatsapp.invoice_pdf', 'action.whatsapp.invoice_image', 'action.payments.split', 'action.payments.tip',
   'action.referrals.pay', 'action.performers.add', 'action.commissions.pay',
   'action.appointments.remind', 'action.appointments.bill',
 ];
@@ -49,7 +49,7 @@ export function installDomShims() {
 // ───────────── API responses (the shapes the real API returns) ─────────────
 const iso = '2026-10-18T10:30:00.000Z';
 const meta = (n: number) => ({ page: 1, limit: 20, total: n, pages: 1 });
-const parlour = { id: 'p1', name: 'Demo Parlour', phone: '9840000000', address: '12 Lake View Road', gstNumber: '33ABCDE1234F1Z5', currency: 'INR', timezone: 'Asia/Kolkata', taxPercent: 5, gstPriceMode: 'exclusive', invoicePrefix: 'DP' };
+const parlour = { id: 'p1', name: 'Demo Parlour', phone: '9840000000', address: '12 Lake View Road', gstNumber: '33ABCDE1234F1Z5', currency: 'INR', timezone: 'Asia/Kolkata', taxPercent: 5, gstPriceMode: 'exclusive', invoicePrefix: 'DP', performerRequired: false };
 const services = [
   { id: 's1', name: 'Haircut', category: 'Hair', price: 200, durationMin: 30, sacCode: '999721', isActive: true },
   { id: 's2', name: 'Facial', category: 'Skin', price: 500, durationMin: 60, sacCode: null, isActive: true },
@@ -57,11 +57,22 @@ const services = [
   { id: 's4', name: 'Old Wax', category: 'Nails', price: 300, durationMin: 20, sacCode: null, isActive: false },
 ];
 const combos = [
-  { id: 'c1', name: 'Glow Pack', price: 600, isActive: true, createdAt: iso, regularPrice: 700, savings: 100, available: true,
+  { id: 'c1', name: 'Glow Pack', price: 600, isActive: true, createdAt: iso, regularPrice: 700, savings: 100, available: true, startDate: null, endDate: null, status: 'active',
     items: [{ serviceId: 's1', name: 'Haircut', quantity: 1, price: 200, isActive: true }, { serviceId: 's2', name: 'Facial', quantity: 1, price: 500, isActive: true }] },
-  { id: 'c2', name: 'Broken Pack', price: 400, isActive: true, createdAt: iso, regularPrice: 500, savings: 100, available: false,
+  { id: 'c2', name: 'Broken Pack', price: 400, isActive: true, createdAt: iso, regularPrice: 500, savings: 100, available: false, startDate: '2026-10-01', endDate: '2026-10-31', status: 'active',
     items: [{ serviceId: 's4', name: 'Old Wax', quantity: 1, price: 300, isActive: false }, { serviceId: 's1', name: 'Haircut', quantity: 1, price: 200, isActive: true }] },
 ];
+const invProducts = [
+  { id: 'ip1', name: 'Argan Oil', sku: 'ARG-100', category: 'Hair care', unit: 'bottle', purchasePrice: 420, sellingPrice: 650, currentStock: 12, minStock: 5, description: null, isActive: true, stockValue: 5040, state: 'ok' },
+  { id: 'ip2', name: 'Bleach', sku: null, category: 'Colour', unit: 'box', purchasePrice: 100, sellingPrice: 0, currentStock: 3, minStock: 5, description: null, isActive: true, stockValue: 300, state: 'low' },
+  { id: 'ip3', name: 'Gloves', sku: null, category: null, unit: 'box', purchasePrice: 50, sellingPrice: 0, currentStock: 0, minStock: 2, description: null, isActive: true, stockValue: 0, state: 'out' },
+];
+const invMovements = [
+  { id: 'im1', productId: 'ip1', productName: 'Argan Oil', type: 'stock_in', quantityChange: 12, quantityBefore: 0, quantityAfter: 12, unitCost: 420, reason: 'Delivery', notes: null, reference: null, supplierName: 'Beauty Mart', purchaseId: null, createdBy: 'Olive Owner', createdAt: iso },
+];
+const invPurchase = { id: 'ipu1', supplierId: 'isu1', supplierName: 'Beauty Mart', invoiceNumber: 'BM-17', purchaseDate: '2026-10-19', totalAmount: 1326, notes: null, createdBy: 'Olive Owner', createdAt: iso, itemCount: 1,
+  items: [{ productId: 'ip1', productName: 'Argan Oil', quantity: 12, unitCost: 110.5, lineTotal: 1326 }] };
+const invSupplier = { id: 'isu1', name: 'Beauty Mart', contactPerson: 'Ravi', phone: '9000000001', email: null, address: null, gstNumber: null, notes: null, isActive: true, purchases: 1 };
 const referrers = [
   { id: 'r1', code: 'REF-0001', name: 'Anita Rao', contact: '9841100001', percent: 10, isActive: true, createdAt: iso, bills: 2, totalDiscount: 240, lastUsedAt: iso, canDelete: false, owed: 240, paidOut: 0, voidedAfterPaid: 0 },
   { id: 'r2', code: 'REF-0002', name: 'Kumar S', contact: '9841100002', percent: 5, isActive: false, createdAt: iso, bills: 0, totalDiscount: 0, lastUsedAt: null, canDelete: true, owed: 0, paidOut: 0, voidedAfterPaid: 0 },
@@ -69,24 +80,72 @@ const referrers = [
 const customers = [{ id: 'cu1', name: 'Cara Customer', phone: '9000000005', email: 'cara@example.com', notes: 'Prefers mornings', createdAt: iso, visits: 3, totalSpent: 2100, lastVisit: iso }];
 // A bill made BEFORE the CGST/SGST split existed: no split saved, one tax line, the parlour's current GSTIN.
 const invoiceRow = { id: 'i1', number: 'DP-00001', customerId: 'cu1', customerName: 'Cara Customer', createdBy: 'u1', createdByName: 'Riya', subtotal: 900, discount: 0, referrerId: 'r1', referralPercent: 10, referralDiscount: 90, taxPercent: 5, tax: 40.5, priceMode: 'exclusive', cgst: null, sgst: null, taxable: 810, total: 850.5, paymentMethod: 'upi', notes: null, tip: 0, status: 'paid', voidReason: null, voidedAt: null, createdAt: iso };
-/** 'legacy': made before the CGST/SGST split. 'split': with the GST split. 'inclusive': GST inside the prices. 'parts': with the GST split, paid by cash + UPI, with a tip. */
-export type InvoiceKind = 'legacy' | 'split' | 'inclusive' | 'parts';
+/**
+ * 'legacy': made before the CGST/SGST split. 'split': with the GST split. 'inclusive': GST inside the prices. 'parts': with the GST split,
+ * paid by cash + UPI, with a tip. 'shared': with the GST split, the Glow Pack shared between Meena (60%) and Asha (40%), and a ₹500 tip
+ * shared ₹300 / ₹200.
+ */
+export type InvoiceKind = 'legacy' | 'split' | 'inclusive' | 'parts' | 'shared';
 const invoice = (phone: string | null, kind: InvoiceKind = 'legacy') => ({
   ...invoiceRow, customerPhone: phone, gstin: '33ABCDE1234F1Z5', referrer: { id: 'r1', code: 'REF-0001', name: 'Anita Rao' },
   // A bill made before split payments existed has no payment list from its own rows: the API shows its one method for the whole total.
   payments: [{ method: 'upi', amount: 850.5 }],
   parlour: { name: 'Demo Parlour', phone: '9840000000', address: '12 Lake View Road', gstNumber: '33ABCDE1234F1Z5', timezone: 'Asia/Kolkata' },
   items: [
-    { id: 'it1', comboId: 'c1', description: 'Haircut + Facial', name: 'Glow Pack', sacCode: null, unitPrice: 600, quantity: 1, lineTotal: 600, performerName: 'Meena' },
-    { id: 'it2', comboId: null, description: null, name: 'Wax', sacCode: kind === 'legacy' ? null : '999722', unitPrice: 300, quantity: 1, lineTotal: 300, performerName: null },
+    {
+      id: 'it1', comboId: 'c1', description: 'Haircut + Facial', name: 'Glow Pack', sacCode: null, unitPrice: 600, quantity: 1, lineTotal: 600,
+      // Who performed it: one person (as every bill used to say), or two with their shares.
+      ...(kind === 'shared'
+        ? { performers: [{ performerId: 'pf1', name: 'Meena', percent: 60 }, { performerId: 'pf2', name: 'Asha', percent: 40 }], performedBy: null, performerName: null }
+        : { performers: [{ performerId: 'pf1', name: 'Meena', percent: 100 }], performedBy: 'pf1', performerName: 'Meena' }),
+    },
+    { id: 'it2', comboId: null, description: null, name: 'Wax', sacCode: kind === 'legacy' ? null : '999722', unitPrice: 300, quantity: 1, lineTotal: 300, performers: [], performedBy: null, performerName: null },
   ],
+  tipShares: kind === 'shared'
+    ? [{ performerId: 'pf1', name: 'Meena', mode: 'fixed', percent: null, amount: 300 }, { performerId: 'pf2', name: 'Asha', mode: 'fixed', percent: null, amount: 200 }]
+    : [],
   // A bill made with the split: GST 5% on top of ₹810 = ₹40.50, as CGST ₹20.25 + SGST ₹20.25, under the GSTIN it was made with.
   ...(kind === 'split' ? { cgst: 20.25, sgst: 20.25, gstin: '33SNAPSHOT00S1Z5' } : {}),
+  ...(kind === 'shared' ? { cgst: 20.25, sgst: 20.25, gstin: '33SNAPSHOT00S1Z5', tip: 500 } : {}),
   // The same bill with GST inside the prices: the customer pays ₹810, of which GST is ₹38.57 (CGST ₹19.29 + SGST ₹19.28).
   // The GST-split bill again, paid ₹500 cash + ₹350.50 UPI (together the total of ₹850.50), with a ₹50 tip that is not in the total.
   ...(kind === 'parts' ? { cgst: 20.25, sgst: 20.25, gstin: '33SNAPSHOT00S1Z5', paymentMethod: 'split', tip: 50, payments: [{ method: 'cash', amount: 500 }, { method: 'upi', amount: 350.5 }] } : {}),
   ...(kind === 'inclusive' ? { priceMode: 'inclusive', tax: 38.57, cgst: 19.29, sgst: 19.28, taxable: 771.43, total: 810, gstin: '33SNAPSHOT00S1Z5' } : {}),
 });
+/**
+ * The A4 invoice the API builds (GET /invoices/:id/a4) for the same bill as `invoice(...)`: already worded and formatted. 'legacy' (the default) is
+ * a bill from before the CGST/SGST split: one GST line, no GSTIN saved. Any other kind has the split and its own saved GSTIN.
+ */
+const a4Model = (kind: InvoiceKind = 'legacy', phone: string | null = '9000000005') => {
+  const legacy = kind === 'legacy';
+  return {
+    version: 1, invoiceId: 'i1', number: 'DP-00001', fileBaseName: 'Invoice-DP-00001', title: 'TAX INVOICE', status: 'paid', isVoid: false, voidNote: null,
+    seller: { name: 'Demo Parlour', addressLines: ['12 Lake View Road'], phone: '9840000000', gstin: legacy ? null : '33SNAPSHOT00S1Z5', gstinNote: legacy ? 'Not recorded on this invoice' : null },
+    meta: [{ label: 'Invoice no.', value: 'DP-00001' }, { label: 'Invoice date', value: '18 Oct 2026, 4:00 pm' }],
+    customer: { name: 'Cara Customer', phone, phoneText: phone ?? 'Not provided' },
+    lines: [
+      { no: 1, name: 'Glow Pack', detail: 'Haircut + Facial', isCombo: true, sac: null, quantity: 1, unitPrice: 600, amount: 600, quantityText: '1', unitPriceText: '₹600.00', amountText: '₹600.00' },
+      { no: 2, name: 'Wax', detail: null, isCombo: false, sac: legacy ? null : '999722', quantity: 1, unitPrice: 300, amount: 300, quantityText: '1', unitPriceText: '₹300.00', amountText: '₹300.00' },
+    ],
+    summary: [
+      { key: 'subtotal', label: 'Subtotal', value: '₹900.00' },
+      { key: 'referral', label: 'Referral discount (Anita Rao, 10%)', value: '− ₹90.00', kind: 'discount' },
+      ...(legacy
+        ? [{ key: 'gst', label: 'GST @ 5%', value: '₹40.50' }]
+        : [{ key: 'taxable', label: 'Taxable value', value: '₹810.00' }, { key: 'cgst', label: 'CGST @ 2.5%', value: '₹20.25' }, { key: 'sgst', label: 'SGST @ 2.5%', value: '₹20.25' }]),
+      { key: 'total', label: 'Total', value: '₹850.50', kind: 'total' },
+    ],
+    included: null,
+    taxTable: legacy
+      ? { mode: 'single', columns: ['Taxable value', 'GST @ 5%', 'Total tax'], row: ['₹810.00', '₹40.50', '₹40.50'], note: 'This invoice was made before GST was split into CGST and SGST, so it shows the one GST amount it was saved with.' }
+      : { mode: 'split', columns: ['Taxable value', 'CGST @ 2.5%', 'SGST @ 2.5%', 'Total tax'], row: ['₹810.00', '₹20.25', '₹20.25', '₹40.50'] },
+    payment: { heading: 'Payment details', status: 'PAID', rows: [{ label: 'UPI', value: '₹850.50' }], split: false, tip: null },
+    notes: ['A combo bundles several services, so it carries no single SAC code.'],
+    footer: ['Questions? Call 9840000000', 'Thank you for visiting.', 'This is a computer-generated invoice.'],
+    amounts: { subtotal: 900, referralDiscount: 90, discount: 0, taxable: 810, taxPercent: 5, tax: 40.5, cgst: legacy ? null : 20.25, sgst: legacy ? null : 20.25, total: 850.5, tip: 0 },
+    missing: [...(legacy ? ['GST_SPLIT', 'GSTIN'] : []), ...(phone ? [] : ['CUSTOMER_PHONE'])],
+  };
+};
 const days = Array.from({ length: 7 }, (_, i) => ({ day: `2026-10-${12 + i}`, revenue: i * 500, invoices: i }));
 const summary = (empty: boolean, performers = true) => ({
   range: { from: '2026-10-12', to: '2026-10-18' },
@@ -108,9 +167,12 @@ const defs = [
   { key: 'action.team.edit', group: 'action', requires: 'page.team', label: 'Edit team member button', description: 'Edit staff.' },
   { key: 'action.team.reset', group: 'action', requires: 'page.team', label: 'Reset password button', description: 'Reset passwords.' },
   { key: 'action.team.deactivate', group: 'action', requires: 'page.team', label: 'Deactivate / Reactivate button', description: 'Deactivate staff.' },
+  { key: 'page.inventory', group: 'page', label: 'Inventory', description: 'Products, stock, purchases, suppliers and stock reports.' },
   { key: 'action.combos.add', group: 'action', requires: 'page.combos', label: 'Add combo button', description: 'Create combos.' },
   { key: 'action.referrals.add', group: 'action', requires: 'page.referrals', label: 'Add referrer button', description: 'Create referrers.' },
   { key: 'action.whatsapp.send', group: 'action', label: 'Send on WhatsApp button', description: 'WhatsApp.' },
+  { key: 'action.whatsapp.invoice_pdf', group: 'action', label: 'Send invoice PDF on WhatsApp button', description: 'Invoice PDF for WhatsApp.' },
+  { key: 'action.whatsapp.invoice_image', group: 'action', label: 'Send invoice image on WhatsApp button', description: 'Invoice image for WhatsApp.' },
   { key: 'action.payments.split', group: 'action', label: 'Split payment button', description: 'Split a bill across payment methods.' },
   { key: 'action.payments.tip', group: 'action', label: 'Tip box', description: 'Record a tip.' },
   { key: 'action.appointments.remind', group: 'action', requires: 'page.appointments', label: 'Appointment reminder button', description: 'Opens WhatsApp with a reminder.' },
@@ -143,24 +205,49 @@ const queueRows = () => [
 const commissionReport = (empty: boolean) => ({
   range: { from: '2026-10-12', to: '2026-10-18' },
   people: empty ? [] : [
-    { id: 'pf1', name: 'Meena', isActive: true, lines: 6, sales: 4200, earned: 420, paid: 120, due: 300, voidedAfterPaid: 0 },
-    { id: 'pf2', name: 'Asha', isActive: true, lines: 3, sales: 2150.5, earned: 150, paid: 0, due: 150, voidedAfterPaid: 50 },
-    { id: 'pf3', name: 'Old Hand', isActive: false, lines: 1, sales: 200, earned: 0, paid: 0, due: 0, voidedAfterPaid: 0 },
+    { id: 'pf1', name: 'Meena', isActive: true, lines: 6, sales: 4200, earned: 420, paid: 120, due: 300, voidedAfterPaid: 0, tips: 300 },
+    { id: 'pf2', name: 'Asha', isActive: true, lines: 3, sales: 2150.5, earned: 150, paid: 0, due: 150, voidedAfterPaid: 50, tips: 200 },
+    { id: 'pf3', name: 'Old Hand', isActive: false, lines: 1, sales: 200, earned: 0, paid: 0, due: 0, voidedAfterPaid: 0, tips: 0 },
   ],
-  totals: empty ? { sales: 0, earned: 0, paid: 0, due: 0, voidedAfterPaid: 0 } : { sales: 6550.5, earned: 570, paid: 120, due: 450, voidedAfterPaid: 50 },
+  totals: empty ? { sales: 0, earned: 0, paid: 0, due: 0, voidedAfterPaid: 0, tips: 0 } : { sales: 6550.5, earned: 570, paid: 120, due: 450, voidedAfterPaid: 50, tips: 500 },
 });
 const commissionLines = (empty: boolean) => ({
   range: { from: '2026-10-12', to: '2026-10-18' }, person: { id: 'pf1', name: 'Meena' }, truncated: false,
   lines: empty ? [] : [
-    { id: 'cl1', invoiceId: 'i1', number: 'DP-00001', status: 'paid', createdAt: iso, name: 'Haircut', quantity: 1, base: 200, kind: 'percent', rate: 10, commission: 20, paid: true },
-    { id: 'cl2', invoiceId: 'i2', number: 'DP-00002', status: 'paid', createdAt: iso, name: 'Massage', quantity: 2, base: 2000, kind: 'flat', rate: 50, commission: 100, paid: false },
-    { id: 'cl3', invoiceId: 'i3', number: 'DP-00003', status: 'void', createdAt: iso, name: 'Facial', quantity: 1, base: 500, kind: null, rate: null, commission: 0, paid: false },
+    { id: 'cl1', invoiceId: 'i1', number: 'DP-00001', status: 'paid', createdAt: iso, name: 'Haircut', quantity: 1, sharePercent: 100, base: 200, kind: 'percent', rate: 10, rule: 'performer', commission: 20, paid: true },
+    { id: 'cl2', invoiceId: 'i2', number: 'DP-00002', status: 'paid', createdAt: iso, name: 'Massage', quantity: 2, sharePercent: 50, base: 2000, kind: 'flat', rate: 50, rule: 'service', commission: 100, paid: false },
+    { id: 'cl3', invoiceId: 'i3', number: 'DP-00003', status: 'void', createdAt: iso, name: 'Facial', quantity: 1, sharePercent: 100, base: 500, kind: null, rate: null, rule: null, commission: 0, paid: false },
+    { id: 'cl4', invoiceId: 'i4', number: 'DP-00004', status: 'paid', createdAt: iso, name: 'Colour', quantity: 1, sharePercent: 60, base: 900, kind: 'percent', rate: 20, rule: 'performer_service', commission: 180, paid: false },
+    { id: 'cl5', invoiceId: 'i5', number: 'DP-00005', status: 'paid', createdAt: iso, name: 'Spa', quantity: 1, sharePercent: 100, base: 1000, kind: 'percent', rate: 5, rule: 'default', commission: 50, paid: false },
+    { id: 'cl6', invoiceId: 'i6', number: 'DP-00006', status: 'paid', createdAt: iso, name: 'Old Cut', quantity: 1, sharePercent: 100, base: 200, kind: 'percent', rate: 10, rule: 'legacy', commission: 20, paid: true },
   ],
 });
+// One of each kind of rule, most specific first, and one that is switched off.
+const rule = (r: Record<string, unknown>) => ({ performerId: null, performerName: null, serviceId: null, serviceName: null, isActive: true, updatedAt: iso, ...r });
 const commissionRules = [
-  { id: 'cr1', kind: 'percent', value: 10, performerId: 'pf1', performerName: 'Meena', serviceId: null, serviceName: null },
-  { id: 'cr2', kind: 'flat', value: 50, performerId: null, performerName: null, serviceId: 's3', serviceName: 'Massage' },
+  rule({ id: 'cr4', kind: 'percent', value: 20, scope: 'performer_service', priority: 1, performerId: 'pf1', performerName: 'Meena', serviceId: 's1', serviceName: 'Haircut' }),
+  rule({ id: 'cr1', kind: 'percent', value: 10, scope: 'performer', priority: 2, performerId: 'pf1', performerName: 'Meena' }),
+  rule({ id: 'cr2', kind: 'flat', value: 50, scope: 'service', priority: 3, serviceId: 's3', serviceName: 'Massage' }),
+  rule({ id: 'cr3', kind: 'percent', value: 5, scope: 'default', priority: 4 }),
+  rule({ id: 'cr5', kind: 'percent', value: 8, scope: 'service', priority: 3, serviceId: 's2', serviceName: 'Facial', isActive: false }),
 ];
+const ruleHistory = [
+  { id: 'rh2', ruleId: 'cr5', action: 'deactivated', scope: 'service', performerName: null, serviceName: 'Facial', kind: 'percent', value: 8, isActive: false, previous: { kind: 'percent', value: 8, isActive: true }, changedAt: iso, changedByName: 'Olive Owner' },
+  { id: 'rh1', ruleId: 'cr4', action: 'updated', scope: 'performer_service', performerName: 'Meena', serviceName: 'Haircut', kind: 'percent', value: 20, isActive: true, previous: { kind: 'percent', value: 15, isActive: true }, changedAt: iso, changedByName: 'Olive Owner' },
+];
+const commissionTips = (empty: boolean) => ({
+  range: { from: '2026-10-12', to: '2026-10-18' },
+  totals: empty ? { tips: 0, shared: 0, unshared: 0 } : { tips: 540, shared: 500, unshared: 40 },
+  people: empty ? [] : [
+    { id: 'pf1', name: 'Meena', isActive: true, amount: 300, bills: 2 },
+    { id: 'pf2', name: 'Asha', isActive: true, amount: 200, bills: 1 },
+  ],
+  truncated: false,
+  bills: empty ? [] : [
+    { invoiceId: 'i1', number: 'DP-00001', status: 'paid', createdAt: iso, customerName: 'Cara Customer', tip: 500, shares: [{ performerId: 'pf1', name: 'Meena', mode: 'fixed', percent: null, amount: 300 }, { performerId: 'pf2', name: 'Asha', mode: 'percent', percent: 40, amount: 200 }] },
+    { invoiceId: 'i2', number: 'DP-00002', status: 'paid', createdAt: iso, customerName: 'Walk-in', tip: 40, shares: [] },
+  ],
+});
 const commissionPayouts = [{ id: 'po1', performerId: 'pf1', performerName: 'Meena', from: '2026-10-01', to: '2026-10-11', amount: 120, lines: 4, paidAt: iso, paidByName: 'Olive Owner' }];
 const attendanceRows = [
   { id: 'a1', userId: 'u2', userName: 'Riya', workDate: '2026-10-29', status: 'checked_out',
@@ -224,9 +311,23 @@ export function respond(path: string, empty: boolean, o: Pick<OpenOptions, 'invo
     [/^\/parlour$/, () => ({ data: { ...parlour, ...o.parlour } })],
     [/^\/services$/, () => ({ data: empty ? [] : services })],
     [/^\/combos$/, () => ({ data: empty ? [] : combos })],
+    [/^\/inventory\/dashboard$/, () => ({ data: empty ? { totalProducts: 0, stockValue: 0, lowStockCount: 0, outOfStockCount: 0, needsAttention: [], recentMovements: [], recentPurchases: [] }
+      : { totalProducts: 3, stockValue: 1250, lowStockCount: 1, outOfStockCount: 1, needsAttention: [invProducts[1], invProducts[2]], recentMovements: invMovements, recentPurchases: [invPurchase] } })],
+    [/^\/inventory\/settings$/, () => ({ data: { allowNegativeStock: false } })],
+    [/^\/inventory\/categories$/, () => ({ data: empty ? [] : ['Hair care'] })],
+    [/^\/inventory\/products\/[^/]+$/, () => ({ data: invProducts[0] })],
+    [/^\/inventory\/products$/, () => list(invProducts)],
+    [/^\/inventory\/movements$/, () => list(invMovements)],
+    [/^\/inventory\/purchases$/, () => ({ data: empty ? [] : [invPurchase], meta: meta(empty ? 0 : 1), summary: { purchases: empty ? 0 : 1, totalAmount: empty ? 0 : 1326 } })],
+    [/^\/inventory\/suppliers$/, () => ({ data: empty ? [] : [invSupplier] })],
+    [/^\/inventory\/reports\/current-stock$/, () => ({ ...list(invProducts), summary: { products: empty ? 0 : 3, stockValue: empty ? 0 : 1250 } })],
+    [/^\/inventory\/reports\/low-stock$/, () => ({ ...list(invProducts.slice(1)), summary: { products: empty ? 0 : 2, outOfStock: empty ? 0 : 1, lowStock: empty ? 0 : 1 } })],
     [/^\/performers$/, () => ({ data: empty ? [] : o.role === 'staff' ? people.filter((p) => p.isActive).map(({ id, name, isActive }) => ({ id, name, isActive })) : people })],
     [/^\/commissions$/, () => ({ data: commissionReport(empty) })],
     [/^\/commissions\/rules$/, () => ({ data: empty ? [] : commissionRules })],
+    [/^\/commissions\/rules\/history$/, () => ({ data: empty ? [] : ruleHistory })],
+    [/^\/commissions\/rules\/resolve$/, () => ({ data: { rule: commissionRules[0], candidates: commissionRules.slice(0, 4) } })],
+    [/^\/commissions\/tips$/, () => ({ data: commissionTips(empty) })],
     [/^\/appointments\/queue$/, () => ({ data: { today: '2026-10-19', queue: empty ? [] : queueRows() } })],
     [/^\/appointments\/[^/]+$/, () => ({ data: visit() })],
     [/^\/appointments$/, () => ({ data: { date: '2026-10-19', today: '2026-10-19', timezone: 'Asia/Kolkata', appointments: empty ? [] : visits(), earlierOpen: empty ? { count: 0, oldest: null } : { count: 2, oldest: '2026-10-16' } } })],
@@ -239,6 +340,7 @@ export function respond(path: string, empty: boolean, o: Pick<OpenOptions, 'invo
     [/^\/customers\/[^/]+$/, () => ({ data: { ...customers[0], recentInvoices: empty ? [] : [{ id: 'i1', number: 'DP-00001', total: 850.5, status: 'paid', paymentMethod: 'upi', createdAt: iso }] } })],
     [/^\/customers$/, () => list(customers)],
     [/^\/invoices\/makers$/, () => ({ data: [{ id: 'u1', name: 'Riya' }, { id: 'u2', name: 'Farah' }] })],
+    [/^\/invoices\/[^/]+\/a4$/, () => ({ data: a4Model(o.invoiceKind, o.invoicePhone === undefined ? '9000000005' : o.invoicePhone) })],
     [/^\/invoices\/[^/]+$/, () => ({ data: invoice(o.invoicePhone === undefined ? '9000000005' : o.invoicePhone, o.invoiceKind) })],
     [/^\/invoices$/, () => list([invoiceRow])],
     [/^\/reports\/summary$/, () => ({ data: summary(empty, !o.off?.includes('page.performers')) })],

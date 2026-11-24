@@ -56,6 +56,24 @@ import { ToastService } from '../../core/toast.service';
                 <span class="hint">Each bill shows the GST split into CGST and SGST either way. Only new bills change if you switch.</span>
               }
             </div>
+            <!-- Staff and performers: the one setting that changes how every bill is made, so it says exactly what it does. -->
+            <div class="field" [class.invalid]="err('performerRequired')">
+              <label class="check" for="performer-required">
+                <input id="performer-required" type="checkbox" formControlName="performerRequired" />
+                <span>Every service on a bill must say who performed it</span>
+              </label>
+              @if (err('performerRequired'); as m) { <span class="field-error">{{ m }}</span> }
+              @else if (form.controls.performerRequired.value !== savedRequired()) {
+                <span class="hint changed" role="status">
+                  {{ form.controls.performerRequired.value
+                    ? 'From the next bill, a service or combo cannot be saved until someone is chosen as the performer. Discounts, GST and tips never need one.'
+                    : 'From the next bill, choosing a performer is optional again.' }}
+                  Bills already made do not change.
+                </span>
+              } @else {
+                <span class="hint">Needs at least one person on the Performers page. Off: choosing a performer is optional, as before.</span>
+              }
+            </div>
           </div>
           <div class="panel-head" style="border-top: 1px solid var(--line); border-bottom: 0; justify-content: flex-end">
             <button type="submit" class="btn btn-primary" [disabled]="busy() || form.pristine">{{ busy() ? 'Saving…' : 'Save settings' }}</button>
@@ -76,6 +94,7 @@ export class SettingsComponent {
   protected readonly error = signal('');
   /** The price setting as last saved, to tell the owner when they are about to change how new bills are worked out. */
   protected readonly savedMode = signal<GstPriceMode>('exclusive');
+  protected readonly savedRequired = signal(false);
   protected readonly form = this.fb.group({
     name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(120)]],
     phone: ['', Validators.maxLength(20)],
@@ -84,6 +103,7 @@ export class SettingsComponent {
     taxPercent: [0, [Validators.required, Validators.min(0), Validators.max(100)]],
     gstPriceMode: ['exclusive' as GstPriceMode, Validators.required],
     invoicePrefix: ['', [Validators.required, Validators.pattern(/^[A-Za-z0-9]{2,8}$/)]],
+    performerRequired: false,
   });
 
   constructor() { this.load(); }
@@ -94,7 +114,7 @@ export class SettingsComponent {
     this.loading.set(true);
     this.loadError.set('');
     this.api.get().subscribe({
-      next: (p) => { this.form.reset({ name: p.name, phone: p.phone ?? '', gstNumber: p.gstNumber ?? '', address: p.address ?? '', taxPercent: p.taxPercent, gstPriceMode: p.gstPriceMode, invoicePrefix: p.invoicePrefix }); this.savedMode.set(p.gstPriceMode); this.loading.set(false); },
+      next: (p) => { this.form.reset({ name: p.name, phone: p.phone ?? '', gstNumber: p.gstNumber ?? '', address: p.address ?? '', taxPercent: p.taxPercent, gstPriceMode: p.gstPriceMode, invoicePrefix: p.invoicePrefix, performerRequired: p.performerRequired }); this.savedMode.set(p.gstPriceMode); this.savedRequired.set(p.performerRequired); this.loading.set(false); },
       error: (e) => { this.loadError.set(parseError(e).message); this.loading.set(false); },
     });
   }
@@ -104,8 +124,8 @@ export class SettingsComponent {
     if (this.form.invalid) { this.form.markAllAsTouched(); return; }
     this.busy.set(true);
     const v = this.form.getRawValue();
-    this.api.update({ name: v.name.trim(), phone: v.phone.trim() || null, gstNumber: v.gstNumber.trim() || null, address: v.address.trim() || null, taxPercent: Number(v.taxPercent), gstPriceMode: v.gstPriceMode, invoicePrefix: v.invoicePrefix.trim() }).subscribe({
-      next: () => { this.busy.set(false); this.savedMode.set(v.gstPriceMode); this.form.markAsPristine(); this.toast.success('Settings saved'); },
+    this.api.update({ name: v.name.trim(), phone: v.phone.trim() || null, gstNumber: v.gstNumber.trim() || null, address: v.address.trim() || null, taxPercent: Number(v.taxPercent), gstPriceMode: v.gstPriceMode, invoicePrefix: v.invoicePrefix.trim(), performerRequired: v.performerRequired }).subscribe({
+      next: () => { this.busy.set(false); this.savedMode.set(v.gstPriceMode); this.savedRequired.set(v.performerRequired); this.form.markAsPristine(); this.toast.success('Settings saved'); },
       error: (e) => { this.busy.set(false); const info = parseError(e); if (!applyFieldErrors(this.form, info)) this.error.set(info.message); },
     });
   }

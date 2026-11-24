@@ -7,6 +7,7 @@ import { AppointmentsApi, CombosApi, CustomersApi, InvoicesApi, NewInvoice, Parl
 import { AuthService } from '../../core/auth.service';
 import { ACCESS_REFUSED, parseError } from '../../core/errors';
 import { computeBill, halfRate, percentOf } from '../../core/gst';
+import { MAX_PEOPLE, ShareRow, TipMode, TipRow, equalRows, equalTipRows, shareStatus, sharesBody, tipSplitBody, tipStatus } from '../../core/allocation';
 import { BillAttempt } from '../../core/idempotency';
 import { SplitInput, emptySplit, formatAmount, parseAmount, paymentsBody, restFor, splitStatus } from '../../core/payments';
 import { Appointment, Combo, Customer, Parlour, PaymentMethod, Performer, ReferrerLookup, Service } from '../../core/models';
@@ -18,8 +19,12 @@ import { ReferrerPickerComponent } from './referrer-picker.component';
 
 const toPaise = (n: number) => Math.round(n * 100);
 
-/** One line on the bill: a service or a combo. `key` is 's:<id>' or 'c:<id>'. `performerId` is who performed it ('' when nobody is chosen). */
-interface Line { key: string; id: string; kind: 'service' | 'combo'; name: string; contents: string; unitPaise: number; qty: number; linePaise: number; performerId: string }
+/**
+ * One line on the bill: a service or a combo. `key` is 's:<id>' or 'c:<id>'. `performerId` is the one person who performed it
+ * ('' when nobody is chosen, and when it is shared). `shares` is who performed it when it is shared between people, each with a
+ * percentage (null when it is not shared).
+ */
+interface Line { key: string; id: string; kind: 'service' | 'combo'; name: string; contents: string; unitPaise: number; qty: number; linePaise: number; performerId: string; shares: ShareRow[] | null }
 const SWATCHES: Record<string, string> = { hair: 'var(--cat-hair)', skin: 'var(--cat-skin)', nails: 'var(--cat-nails)', waxing: 'var(--cat-waxing)', bridal: 'var(--cat-bridal)' };
 
 @Component({
@@ -157,10 +162,42 @@ const SWATCHES: Record<string, string> = { hair: 'var(--cat-hair)', skin: 'var(-
                       </span>
                       @if (l.contents) { <span class="contents">{{ l.contents }}</span> }
                       @if (showPerformers()) {
-                        <select class="select performer" [attr.aria-label]="'Performed by, ' + l.name" [ngModel]="l.performerId" (ngModelChange)="setPerformer(l.key, $event)">
-                          <option value="">Performed by…</option>
-                          @for (p of performers(); track p.id) { <option [value]="p.id">{{ p.name }}</option> }
-                        </select>
+                        @if (!l.shares) {
+                          <div class="performer-wrap">
+                            <select class="select performer" [attr.aria-label]="'Performed by, ' + l.name" [class.bad]="required() && !l.performerId" [ngModel]="l.performerId" (ngModelChange)="setPerformer(l.key, $event)">
+                              <option value="">Performed by…</option>
+                              @for (p of performers(); track p.id) { <option [value]="p.id">{{ p.name }}</option> }
+                            </select>
+                            @if (performers().length > 1) {
+                              <button type="button" class="btn btn-ghost btn-sm share-btn" [attr.aria-label]="'Share ' + l.name + ' between people'" (click)="startShare(l.key)">Share</button>
+                            }
+                          </div>
+                          @if (required() && !l.performerId) { <div class="field-error performer-error">Choose who performed this</div> }
+                        } @else {
+                          @let st = shareStates().get(l.key);
+                          <div class="shares" role="group" [attr.aria-label]="'Who performed ' + l.name">
+                            @for (row of l.shares; track $index) {
+                              <div class="share-row">
+                                <select class="select" [attr.aria-label]="'Person ' + ($index + 1) + ' for ' + l.name" [class.bad]="!!st?.rowErrors?.[$index] && !row.performerId" [ngModel]="row.performerId" (ngModelChange)="setShareRow(l.key, $index, { performerId: $event })">
+                                  <option value="">Choose…</option>
+                                  @for (p of performers(); track p.id) { <option [value]="p.id">{{ p.name }}</option> }
+                                </select>
+                                <span class="input-suffix">
+                                  <input class="input" inputmode="decimal" placeholder="0" [attr.aria-label]="'Percent for person ' + ($index + 1) + ' on ' + l.name" [ngModel]="row.percent" (ngModelChange)="setShareRow(l.key, $index, { percent: $event })" [class.bad]="!!st?.rowErrors?.[$index] && !!row.performerId" />
+                                  <span class="suffix">%</span>
+                                </span>
+                                <button type="button" class="icon-btn" [attr.aria-label]="'Remove person ' + ($index + 1) + ' from ' + l.name" (click)="removeShareRow(l.key, $index)"><app-icon name="trash" [size]="14" /></button>
+                              </div>
+                              @if (st?.rowErrors?.[$index]; as why) { <div class="field-error">{{ why }}</div> }
+                            }
+                            <div class="share-foot">
+                              @if (l.shares.length < maxPeople && l.shares.length < performers().length) { <button type="button" class="btn btn-ghost btn-sm" (click)="addShareRow(l.key)">Add person</button> }
+                              <button type="button" class="btn btn-ghost btn-sm" (click)="equalShares(l.key)">Split equally</button>
+                              <button type="button" class="btn btn-ghost btn-sm" (click)="stopShare(l.key)">One person</button>
+                              <span class="share-status" role="status" [class.ok]="st?.ok">{{ st?.message }}</span>
+                            </div>
+                          </div>
+                        }
                       }
                     </li>
                   }
@@ -227,8 +264,46 @@ const SWATCHES: Record<string, string> = { hair: 'var(--cat-hair)', skin: 'var(-
                     <span class="input-prefix"><span class="prefix">₹</span><input id="tip" class="input" inputmode="decimal" placeholder="0" [ngModel]="tipInput()" (ngModelChange)="tipInput.set($event)" [class.bad]="tipError()" /></span>
                   </div>
                   @if (tipError(); as m) { <div class="field-error">{{ m }}</div> }
+                  @if (canShareTip() && tipP() > 0) {
+                    <div class="tip-share" role="group" aria-labelledby="tip-share-label">
+                      <div class="row spread">
+                        <div class="label" id="tip-share-label">Share the tip <span class="muted small">(optional)</span></div>
+                      </div>
+                      <div class="segmented fill" role="group" aria-label="How to share the tip">
+                        <button type="button" [attr.aria-pressed]="tipMode() === 'none'" (click)="setTipMode('none')">Not shared</button>
+                        <button type="button" [attr.aria-pressed]="tipMode() === 'fixed'" (click)="setTipMode('fixed')">By amount</button>
+                        <button type="button" [attr.aria-pressed]="tipMode() === 'percent'" (click)="setTipMode('percent')">By percentage</button>
+                      </div>
+                      @if (tipMode() !== 'none') {
+                        @for (row of tipRows(); track $index) {
+                          <div class="share-row">
+                            <select class="select" [attr.aria-label]="'Tip: person ' + ($index + 1)" [class.bad]="!!tipState().rowErrors[$index] && !row.performerId" [ngModel]="row.performerId" (ngModelChange)="setTipRow($index, { performerId: $event })">
+                              <option value="">Choose…</option>
+                              @for (p of performers(); track p.id) { <option [value]="p.id">{{ p.name }}</option> }
+                            </select>
+                            @if (tipMode() === 'fixed') {
+                              <span class="input-prefix"><span class="prefix">₹</span><input class="input" inputmode="decimal" placeholder="0" [attr.aria-label]="'Tip amount for person ' + ($index + 1)" [ngModel]="row.value" (ngModelChange)="setTipRow($index, { value: $event })" [class.bad]="!!tipState().rowErrors[$index] && !!row.performerId" /></span>
+                            } @else {
+                              <span class="input-suffix"><input class="input" inputmode="decimal" placeholder="0" [attr.aria-label]="'Tip percent for person ' + ($index + 1)" [ngModel]="row.value" (ngModelChange)="setTipRow($index, { value: $event })" [class.bad]="!!tipState().rowErrors[$index] && !!row.performerId" /><span class="suffix">%</span></span>
+                            }
+                            <button type="button" class="icon-btn" [attr.aria-label]="'Remove tip person ' + ($index + 1)" (click)="removeTipRow($index)"><app-icon name="trash" [size]="14" /></button>
+                          </div>
+                          @if (tipState().rowErrors[$index]; as why) { <div class="field-error">{{ why }}</div> }
+                        }
+                        <div class="share-foot">
+                          @if (tipRows().length < maxPeople && tipRows().length < performers().length) { <button type="button" class="btn btn-ghost btn-sm" (click)="addTipRow()">Add person</button> }
+                          <button type="button" class="btn btn-ghost btn-sm" (click)="equalTip()">Split equally</button>
+                          <span class="share-status" role="status" [class.ok]="tipState().ok">{{ tipState().message }}</span>
+                        </div>
+                      }
+                    </div>
+                  }
                 }
               </div>
+
+              @if (missingPerformers().length) {
+                <div class="field-error required-note" role="alert">Choose who performed: {{ missingPerformers().join(', ') }}</div>
+              }
 
               <button type="button" class="btn btn-primary btn-lg btn-block save" [disabled]="!canSave()" (click)="save()">
                 {{ saving() ? 'Saving…' : lines().length ? 'Save bill · ' + (totalP() / 100 | money) : 'Save bill' }}
@@ -268,6 +343,15 @@ const SWATCHES: Record<string, string> = { hair: 'var(--cat-hair)', skin: 'var(-
     .split-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 8px; .input { text-align: right; min-height: 36px; padding-top: 6px; padding-bottom: 6px; } .input.bad { border-color: var(--brick); } }
     .split-status { font-size: 13.5px; font-weight: 600; color: var(--brick); text-align: right; &.ok { color: var(--sage); } }
     .tip { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; .input-prefix { width: 120px; flex: none; } .input { text-align: right; min-height: 36px; padding-top: 6px; padding-bottom: 6px; } .input.bad { border-color: var(--brick); } }
+    .performer-wrap { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; .performer { flex: 1; min-width: 0; } .performer.bad { border-color: var(--brick); } .share-btn { flex: none; } }
+    .performer-error { grid-column: 1 / -1; }
+    .shares { grid-column: 1 / -1; display: grid; gap: 8px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: var(--r-control); background: var(--sunken); }
+    .share-row { display: grid; grid-template-columns: minmax(0, 1fr) 104px auto; align-items: center; gap: 8px; .select, .input { min-height: 36px; padding-top: 6px; padding-bottom: 6px; font-size: 13.5px; } .input { text-align: right; } .select.bad, .input.bad { border-color: var(--brick); } }
+    .input-suffix { position: relative; display: block; .input { padding-right: 26px; } .suffix { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; } }
+    .share-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .share-status { margin-left: auto; font-size: 13.5px; font-weight: 600; color: var(--brick); &.ok { color: var(--sage); } }
+    .tip-share { margin-top: 12px; display: grid; gap: 8px; }
+    .required-note { margin-top: 10px; }
     .visit-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; margin-bottom: 12px; border-radius: var(--r-control); background: var(--lacquer-tint); color: var(--lacquer-ink); font-size: 14px; }
     .save { margin-top: 16px; }
     .clear { margin-top: 6px; }
@@ -310,6 +394,12 @@ export class NewBillComponent {
   protected readonly cart = signal<ReadonlyMap<string, number>>(new Map());
   /** Who performed each line (line key to performer id). A line with no entry has nobody chosen, and the bill is saved without one. */
   protected readonly performerOf = signal<ReadonlyMap<string, string>>(new Map());
+  /**
+   * Lines shared between people (line key to rows, each a person and their percentage as typed). A line here is performed by several
+   * people; one with no entry here has one person (performerOf) or nobody. The percentages must add up to exactly 100 to save.
+   */
+  protected readonly sharesOf = signal<ReadonlyMap<string, ShareRow[]>>(new Map());
+  protected readonly maxPeople = MAX_PEOPLE;
   /** The person chosen most recently: a line added next starts with them, because one person usually does the whole bill. */
   private readonly lastPerformer = signal('');
   protected readonly performers = signal<Performer[]>([]);
@@ -342,14 +432,15 @@ export class NewBillComponent {
     const services = new Map(this.services().map((s) => [s.id, s]));
     const combos = new Map(this.availableCombos().map((c) => [c.id, c]));
     const who = this.performerOf();
+    const shared = this.sharesOf();
     return [...this.cart().entries()].flatMap(([key, qty]): Line[] => {
       const id = key.slice(2);
       if (key.startsWith('s:')) {
         const s = services.get(id);
-        return s ? [{ key, id, kind: 'service', name: s.name, contents: '', unitPaise: toPaise(s.price), qty, linePaise: toPaise(s.price) * qty, performerId: who.get(key) ?? '' }] : [];
+        return s ? [{ key, id, kind: 'service', name: s.name, contents: '', unitPaise: toPaise(s.price), qty, linePaise: toPaise(s.price) * qty, performerId: who.get(key) ?? '', shares: shared.get(key) ?? null }] : [];
       }
       const c = combos.get(id);
-      return c ? [{ key, id, kind: 'combo', name: c.name, contents: this.contents(c), unitPaise: toPaise(c.price), qty, linePaise: toPaise(c.price) * qty, performerId: who.get(key) ?? '' }] : [];
+      return c ? [{ key, id, kind: 'combo', name: c.name, contents: this.contents(c), unitPaise: toPaise(c.price), qty, linePaise: toPaise(c.price) * qty, performerId: who.get(key) ?? '', shares: shared.get(key) ?? null }] : [];
     });
   });
   protected readonly itemCount = computed(() => this.lines().reduce((n, l) => n + l.qty, 0));
@@ -394,9 +485,30 @@ export class NewBillComponent {
   protected readonly splitState = computed(() => splitStatus(this.splitInput(), this.totalP()));
   private readonly tipParsed = computed(() => (this.canTip() ? parseAmount(this.tipInput()) : 0));
   protected readonly tipError = computed(() => (this.tipParsed() === null ? 'Enter an amount like 50 or 49.50' : ''));
+  /** Sharing a tip names people, so it needs the Performers page as well as the Tip box. */
+  protected readonly canShareTip = computed(() => this.canTip() && this.showPerformers());
+  /** How the tip is shared between people, and the rows typed. Only used while there is a tip to share. */
+  protected readonly tipMode = signal<TipMode>('none');
+  protected readonly tipRows = signal<TipRow[]>([]);
+  private readonly tipModeInUse = computed<TipMode>(() => (this.canShareTip() && this.tipP() > 0 ? this.tipMode() : 'none'));
+  protected readonly tipState = computed(() => tipStatus(this.tipModeInUse(), this.tipRows(), this.tipP()));
+  /** Where each shared line stands (key to status): every row filled in, nobody twice, adding up to exactly 100. */
+  protected readonly shareStates = computed(() => new Map(this.lines().filter((l) => l.shares).map((l) => [l.key, shareStatus(l.shares as ShareRow[])])));
+  /** The parlour made the performer compulsory (and the Performers page is on, so someone can be chosen). */
+  protected readonly required = computed(() => !!this.parlour()?.performerRequired && this.showPerformers());
+  /** The lines nobody has been chosen for, while that is compulsory. Discount, GST and tip are not lines and never need a person. */
+  protected readonly missingPerformers = computed(() => (this.required() ? this.lines().filter((l) => !l.shares && !l.performerId).map((l) => l.name) : []));
+  /** The distinct people chosen on the lines, in the order they first appear: who a tip is most likely shared between. */
+  private readonly peopleOnBill = computed(() => {
+    const ids: string[] = [];
+    for (const l of this.lines()) for (const id of l.shares ? l.shares.map((r) => r.performerId) : [l.performerId]) if (id && !ids.includes(id)) ids.push(id);
+    return ids;
+  });
   /** Extra money for the staff. It is not part of the total and takes no part in the payments adding up. */
-  private readonly tipP = computed(() => this.tipParsed() ?? 0);
-  protected readonly canSave = computed(() => this.lines().length > 0 && !this.discountError() && !this.tipError() && (!this.splitting() || this.splitState().ok) && !this.saving());
+  protected readonly tipP = computed(() => this.tipParsed() ?? 0);
+  protected readonly canSave = computed(() =>
+    this.lines().length > 0 && !this.discountError() && !this.tipError() && (!this.splitting() || this.splitState().ok)
+    && [...this.shareStates().values()].every((s) => s.ok) && this.tipState().ok && !this.missingPerformers().length && !this.saving());
 
   constructor() {
     this.load();
@@ -484,8 +596,10 @@ export class NewBillComponent {
       if (qty <= 0) next.delete(key); else next.set(key, qty);
       return next;
     });
-    if (!this.cart().has(key)) this.performerOf.update((m) => { const next = new Map(m); next.delete(key); return next; });
-    else if (isNew && this.showPerformers() && this.lastPerformer()) this.performerOf.update((m) => new Map(m).set(key, this.lastPerformer()));
+    if (!this.cart().has(key)) {
+      this.performerOf.update((m) => { const next = new Map(m); next.delete(key); return next; });
+      this.sharesOf.update((m) => { const next = new Map(m); next.delete(key); return next; });
+    } else if (isNew && this.showPerformers() && this.lastPerformer()) this.performerOf.update((m) => new Map(m).set(key, this.lastPerformer()));
   }
 
   /** Choose who performed a line (an empty choice means nobody). */
@@ -494,18 +608,83 @@ export class NewBillComponent {
     if (id) this.lastPerformer.set(id);
   }
 
+  /** Starts sharing a line between people: the person already chosen (if any) and one more, 50% each. */
+  protected startShare(key: string) {
+    const first = this.performerOf().get(key) ?? '';
+    this.performerOf.update((m) => { const next = new Map(m); next.delete(key); return next; });
+    this.sharesOf.update((m) => new Map(m).set(key, [{ performerId: first, percent: '50' }, { performerId: '', percent: '50' }]));
+  }
+  protected setShareRow(key: string, index: number, patch: Partial<ShareRow>) {
+    this.sharesOf.update((m) => {
+      const rows = m.get(key);
+      return rows ? new Map(m).set(key, rows.map((r, i) => (i === index ? { ...r, ...patch } : r))) : m;
+    });
+    if (patch.performerId) this.lastPerformer.set(patch.performerId);
+  }
+  protected addShareRow(key: string) {
+    this.sharesOf.update((m) => {
+      const rows = m.get(key);
+      return rows && rows.length < MAX_PEOPLE ? new Map(m).set(key, [...rows, { performerId: '', percent: '' }]) : m;
+    });
+  }
+  /** Takes someone off the line. With one person left it is no longer shared: that person did all of it. */
+  protected removeShareRow(key: string, index: number) {
+    const rows = this.sharesOf().get(key);
+    if (!rows) return;
+    const left = rows.filter((_, i) => i !== index);
+    if (left.length <= 1) { this.stopShare(key, left[0]?.performerId ?? ''); return; }
+    this.sharesOf.update((m) => new Map(m).set(key, left));
+  }
+  /** Everyone on the line gets an equal share, adding up to exactly 100 (the spare hundredth goes to the first). */
+  protected equalShares(key: string) {
+    this.sharesOf.update((m) => {
+      const rows = m.get(key);
+      return rows ? new Map(m).set(key, equalRows(rows.map((r) => r.performerId)).map((r, i) => ({ ...r, performerId: rows[i].performerId }))) : m;
+    });
+  }
+  /** Back to one person for the whole line: the first one chosen, or nobody. */
+  protected stopShare(key: string, keep?: string) {
+    const rows = this.sharesOf().get(key);
+    const who = keep ?? rows?.find((r) => r.performerId)?.performerId ?? '';
+    this.sharesOf.update((m) => { const next = new Map(m); next.delete(key); return next; });
+    this.performerOf.update((m) => { const next = new Map(m); if (who) next.set(key, who); else next.delete(key); return next; });
+  }
+
+  // ───────────── sharing the tip ─────────────
+
+  /** Chooses how the tip is shared. Starting to share begins with the people on the bill, equally. */
+  protected setTipMode(mode: TipMode) {
+    this.tipMode.set(mode);
+    if (mode === 'none') return;
+    const ids = this.tipRows().length ? this.tipRows().map((r) => r.performerId) : this.peopleOnBill();
+    this.tipRows.set(ids.length ? equalTipRows(mode, ids.map((id) => id || 'x'), this.tipP()).map((r, i) => ({ ...r, performerId: ids[i] })) : [{ performerId: '', value: '' }]);
+  }
+  protected setTipRow(index: number, patch: Partial<TipRow>) { this.tipRows.update((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r))); }
+  protected addTipRow() { this.tipRows.update((rows) => (rows.length < MAX_PEOPLE ? [...rows, { performerId: '', value: '' }] : rows)); }
+  protected removeTipRow(index: number) { this.tipRows.update((rows) => rows.filter((_, i) => i !== index)); }
+  /** Splits the tip equally between the people in the boxes (or, with none yet, the people on the bill), down to the paisa. */
+  protected equalTip() {
+    const mode = this.tipMode();
+    if (mode === 'none') return;
+    const ids = this.tipRows().length ? this.tipRows().map((r) => r.performerId) : this.peopleOnBill();
+    if (!ids.length) return;
+    this.tipRows.set(equalTipRows(mode, ids.map((id) => id || 'x'), this.tipP()).map((r, i) => ({ ...r, performerId: ids[i] })));
+  }
+
   /** Takes the list of people on offer, and drops anyone chosen on the bill who is no longer on it (deactivated or removed). */
   private setPerformers(list: Performer[]) {
     this.performers.set(list);
     const ok = new Set(list.map((p) => p.id));
     this.performerOf.update((m) => new Map([...m].filter(([, id]) => ok.has(id))));
+    this.sharesOf.update((m) => new Map([...m].map(([key, rows]) => [key, rows.map((r) => (r.performerId && !ok.has(r.performerId) ? { ...r, performerId: '' } : r))])));
+    this.tipRows.update((rows) => rows.map((r) => (r.performerId && !ok.has(r.performerId) ? { ...r, performerId: '' } : r)));
     if (!ok.has(this.lastPerformer())) this.lastPerformer.set('');
   }
 
   protected clear() {
-    this.performerOf.set(new Map()); this.lastPerformer.set('');
+    this.performerOf.set(new Map()); this.sharesOf.set(new Map()); this.lastPerformer.set('');
     this.cart.set(new Map()); this.discountInput.set(''); this.referrer.set(null);
-    this.tipInput.set(''); this.splitMode.set(false); this.splitInput.set(emptySplit());
+    this.tipInput.set(''); this.tipMode.set('none'); this.tipRows.set([]); this.splitMode.set(false); this.splitInput.set(emptySplit());
   }
 
   protected toggleSplit() {
@@ -534,12 +713,18 @@ export class NewBillComponent {
     const bill: NewInvoice = {
       customerId: this.customer()?.id ?? null,
       walkInName: this.customer() ? undefined : this.walkIn().trim() || undefined,
-      items: this.lines().map((l) => ({ ...(l.kind === 'combo' ? { comboId: l.id } : { serviceId: l.id }), ...(l.performerId ? { performedBy: l.performerId } : {}), quantity: l.qty })),
+      items: this.lines().map((l) => ({
+        ...(l.kind === 'combo' ? { comboId: l.id } : { serviceId: l.id }),
+        // One person, or several each with a percentage (never both), or nobody.
+        ...(l.shares ? { performers: sharesBody(l.shares) } : l.performerId ? { performedBy: l.performerId } : {}),
+        quantity: l.qty,
+      })),
       referrerId: this.referrer()?.id ?? null,
       discount: this.discountP() / 100,
       // One method is sent exactly as it always was; a split sends each amount. Either way the server checks they add up.
       ...(this.splitting() ? { payments: paymentsBody(this.splitState().parts) } : { paymentMethod: this.payment() }),
       ...(tip > 0 ? { tip: tip / 100 } : {}),
+      ...(tip > 0 && this.tipModeInUse() !== 'none' ? { tipSplit: tipSplitBody(this.tipModeInUse(), this.tipRows()) } : {}),
       ...(this.visit() ? { appointmentId: this.visit()!.id } : {}),
     };
     this.invoicesApi.create(bill, this.attempt.keyFor(bill)).subscribe({

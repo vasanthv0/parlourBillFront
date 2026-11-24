@@ -11,10 +11,11 @@ import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../../shared/icon.component';
 import { ModalComponent } from '../../shared/modal.component';
 import { MoneyPipe } from '../../shared/money.pipe';
+import { InvoiceShareComponent } from './invoice-share.component';
 
 @Component({
   selector: 'app-invoice-detail',
-  imports: [FormsModule, RouterLink, DatePipe, MoneyPipe, IconComponent, ModalComponent],
+  imports: [FormsModule, RouterLink, DatePipe, MoneyPipe, IconComponent, ModalComponent, InvoiceShareComponent],
   template: `
     <div class="page narrow">
       <div class="page-head no-print">
@@ -25,7 +26,11 @@ import { MoneyPipe } from '../../shared/money.pipe';
             @if (inv.status === 'paid' && auth.hasFeature('action.whatsapp.send')) {
               <button type="button" class="btn btn-secondary" [disabled]="sending()" (click)="sendWhatsApp()"><app-icon name="whatsapp" /> {{ sending() ? 'Opening…' : 'WhatsApp' }}</button>
             }
+            <!-- Task 6: the invoice as a PDF or an image for WhatsApp. Each button has its own switch; the old text button above is unchanged. -->
+            <app-invoice-share [invoice]="inv" />
             <button type="button" class="btn btn-secondary" (click)="print()"><app-icon name="printer" /> Print</button>
+            <!-- Task 6: the A4 tax invoice has its own page and its own Print button; the 80mm Print above is untouched. -->
+            <a class="btn btn-secondary" [routerLink]="[base, 'invoices', inv.id, 'a4']"><app-icon name="receipt" /> A4 invoice</a>
             <a class="btn btn-primary" [routerLink]="[base, 'new-bill']"><app-icon name="plus" /> New bill</a>
           </div>
         }
@@ -63,7 +68,12 @@ import { MoneyPipe } from '../../shared/money.pipe';
                 @if (it.description) { <span class="desc">{{ it.description }}</span> }
                 @if (it.sacCode) { <span class="desc">SAC {{ it.sacCode }}</span> }
                 <!-- Who did it: on screen for the owner and staff, left off the printed receipt the customer takes home. -->
-                @if (it.performerName) { <span class="desc no-print">Performed by {{ it.performerName }}</span> }
+                @if (it.performers.length === 1) { <span class="desc no-print">Performed by {{ it.performers[0].name }}</span> }
+                @else if (it.performers.length > 1) {
+                  <span class="desc no-print performers">Performed by
+                    @for (p of it.performers; track p.performerId) { <span class="who">{{ p.name }} {{ p.percent }}%</span>@if (!$last) { <span aria-hidden="true"> · </span> } }
+                  </span>
+                }
               </li>
             }
           </ul>
@@ -102,6 +112,12 @@ import { MoneyPipe } from '../../shared/money.pipe';
             <p class="paid-by">Paid by {{ paidBy(inv) }}</p>
           }
           @if (inv.tip > 0) { <p class="tip-note">Tip {{ inv.tip | money: true }}: extra, not included in the total above.</p> }
+          <!-- How the tip was shared is for the people who work here, not the customer: on screen, left off the printed receipt. -->
+          @if (inv.tipShares.length) {
+            <p class="tip-note no-print tip-shares">Tip shared:
+              @for (t of inv.tipShares; track t.performerId) { <span class="who">{{ t.name }} {{ t.amount | money: true }}@if (t.percent !== null) { ({{ t.percent }}%) }</span>@if (!$last) { <span aria-hidden="true"> · </span> } }
+            </p>
+          }
 
           @if (inv.status === 'void') {
             <p class="void-note"><strong>Voided</strong> {{ inv.voidedAt | date: 'd MMM y, h:mm a' }}. Reason: {{ inv.voidReason }}</p>

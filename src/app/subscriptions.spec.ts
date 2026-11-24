@@ -214,7 +214,7 @@ describe('the Subscription panel on a parlour’s page', () => {
 
   it('does not add or change any of the parlour’s own switches', async () => {
     const page = await asSuper(ParlourDetailComponent);
-    expect([...page.host.querySelectorAll('[role="switch"]')].length).toBe(27); // the same count as before: the panel has none of its own
+    expect([...page.host.querySelectorAll('[role="switch"]')].length).toBe(28); // the same count as before: the panel has none of its own
   });
 
   it('renewing explains it adds a period after the current expiry, and sends no payment unless one is ticked', async () => {

@@ -1,5 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
-import { FormsModule, NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { AbstractControl, FormsModule, NonNullableFormBuilder, ReactiveFormsModule, ValidationErrors, ValidatorFn, Validators } from '@angular/forms';
 import { CombosApi, ServicesApi } from '../../core/api';
 import { AuthService } from '../../core/auth.service';
 import { applyFieldErrors, controlError, parseError } from '../../core/errors';
@@ -11,6 +11,16 @@ import { MoneyPipe } from '../../shared/money.pipe';
 
 interface Part { serviceId: string; name: string; price: number; quantity: number; isActive: boolean }
 const toPaise = (n: number) => Math.round(n * 100);
+
+/** The end date cannot be before the start date (the server checks this too). The message lands on the end date field. */
+const datesInOrder: ValidatorFn = (group: AbstractControl): ValidationErrors | null => {
+  const start = group.get('startDate')?.value as string;
+  const end = group.get('endDate');
+  const bad = !!start && !!end?.value && start > end.value;
+  if (bad) end?.setErrors({ ...(end.errors ?? {}), server: 'The end date cannot be before the start date' });
+  else if (end?.errors?.['server'] === 'The end date cannot be before the start date') { const { server, ...rest } = end.errors; void server; end.setErrors(Object.keys(rest).length ? rest : null); }
+  return null;
+};
 
 @Component({
   selector: 'app-combos',
@@ -35,7 +45,7 @@ const toPaise = (n: number) => Math.round(n * 100);
       } @else {
         <div class="table-wrap">
           <table class="table">
-            <thead><tr><th>Combo</th><th class="num">Separately</th><th class="num">Combo price</th><th class="num">Customer saves</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead>
+            <thead><tr><th>Combo</th><th class="num">Separately</th><th class="num">Combo price</th><th class="num">Customer saves</th><th>Status</th><th>Valid</th><th><span class="sr-only">Actions</span></th></tr></thead>
             <tbody>
               @for (c of items(); track c.id) {
                 <tr [class.off]="!c.isActive">
@@ -45,9 +55,12 @@ const toPaise = (n: number) => Math.round(n * 100);
                   <td class="num" [class.good]="c.savings > 0">{{ c.savings > 0 ? (c.savings | money) : 'None' }}</td>
                   <td>
                     @if (!c.isActive) { <span class="badge badge-warn">Paused</span> }
+                    @else if (c.status === 'upcoming') { <span class="badge badge-warn" title="Cannot be sold until its start date">Upcoming</span> }
+                    @else if (c.status === 'expired') { <span class="badge badge-void" title="Cannot be sold after its end date">Expired</span> }
                     @else if (!c.available) { <span class="badge badge-void" title="A service inside this combo was archived. Edit the combo to fix it.">Needs attention</span> }
                     @else { <span class="badge badge-paid">Active</span> }
                   </td>
+                  <td class="small">{{ validity(c) }}</td>
                   <td class="cell-actions">
                     <button type="button" class="btn btn-ghost btn-sm" (click)="openForm(c)"><app-icon name="pencil" [size]="16" /> Edit</button>
                     <button type="button" class="btn btn-ghost btn-sm" (click)="toggle(c)">{{ c.isActive ? 'Pause' : 'Resume' }}</button>
@@ -99,6 +112,20 @@ const toPaise = (n: number) => Math.round(n * 100);
             }
             @if (partsError(); as m) { <span class="field-error">{{ m }}</span> }
           </div>
+
+          <div class="form-grid">
+            <div class="field" [class.invalid]="err('startDate')">
+              <label class="label" for="cb-start">Starts on <span class="muted small">(optional)</span></label>
+              <input id="cb-start" class="input" type="date" formControlName="startDate" />
+              @if (err('startDate'); as m) { <span class="field-error">{{ m }}</span> }
+            </div>
+            <div class="field" [class.invalid]="err('endDate')">
+              <label class="label" for="cb-end">Ends on <span class="muted small">(optional)</span></label>
+              <input id="cb-end" class="input" type="date" formControlName="endDate" />
+              @if (err('endDate'); as m) { <span class="field-error">{{ m }}</span> }
+            </div>
+          </div>
+          <p class="hint">Both days count. Leave both empty for a combo with no time limit. Dates follow your parlour's time zone, and the server refuses to sell a combo outside them.</p>
 
           <div class="form-grid">
             <div class="field" [class.invalid]="err('price')">
@@ -171,7 +198,9 @@ export class CombosComponent {
   protected readonly form = this.fb.group({
     name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(80)]],
     price: [0, [Validators.required, Validators.min(0), Validators.max(1000000)]],
-  });
+    startDate: [''],
+    endDate: [''],
+  }, { validators: [datesInOrder] });
 
   constructor() {
     this.form.controls.price.valueChanges.subscribe((v) => this.price.set(Number(v) || 0));
@@ -179,6 +208,11 @@ export class CombosComponent {
     this.load();
   }
 
+  protected validity(c: Combo) {
+    if (!c.startDate && !c.endDate) return 'Always';
+    if (c.startDate && c.endDate) return `${c.startDate} to ${c.endDate}`;
+    return c.startDate ? `From ${c.startDate}` : `Until ${c.endDate}`;
+  }
   protected contents(c: Combo) { return c.items.map((i) => (i.quantity > 1 ? `${i.name} × ${i.quantity}` : i.name)).join(' + '); }
   protected err(name: string) { return controlError(this.form.get(name), { required: 'Required' }); }
 
@@ -197,7 +231,7 @@ export class CombosComponent {
     this.partsError.set('');
     this.pick.set('');
     this.parts.set(c ? c.items.map((i) => ({ serviceId: i.serviceId, name: i.name, price: i.price, quantity: i.quantity, isActive: i.isActive })) : []);
-    this.form.reset({ name: c?.name ?? '', price: c?.price ?? 0 });
+    this.form.reset({ name: c?.name ?? '', price: c?.price ?? 0, startDate: c?.startDate ?? '', endDate: c?.endDate ?? '' });
     this.price.set(c?.price ?? 0);
     this.formOpen.set(true);
   }
@@ -224,7 +258,8 @@ export class CombosComponent {
 
     this.busy.set(true);
     const v = this.form.getRawValue();
-    const body = { name: v.name.trim(), price: Number(v.price), items: this.parts().map((p) => ({ serviceId: p.serviceId, quantity: p.quantity })) };
+    // An empty date box means "no limit": send null so editing can also clear a date.
+    const body = { name: v.name.trim(), price: Number(v.price), startDate: v.startDate || null, endDate: v.endDate || null, items: this.parts().map((p) => ({ serviceId: p.serviceId, quantity: p.quantity })) };
     const editing = this.editing();
     (editing ? this.api.update(editing.id, body) : this.api.create(body)).subscribe({
       next: () => { this.busy.set(false); this.formOpen.set(false); this.toast.success(editing ? 'Combo updated' : 'Combo created'); this.load(); },

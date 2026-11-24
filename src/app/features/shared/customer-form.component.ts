@@ -82,7 +82,7 @@ export class CustomerFormComponent {
       error: (e) => {
         this.busy.set(false);
         const info = parseError(e);
-        if (info.code === 'PHONE_EXISTS') { this.form.get('phone')?.setErrors({ server: info.message }); this.form.get('phone')?.markAsTouched(); }
+        if (info.code === 'PHONE_EXISTS') { this.form.get('phone')?.setErrors({ server: info.fields['phone'] ?? info.message }); this.form.get('phone')?.markAsTouched(); }
         else if (!applyFieldErrors(this.form, info)) this.error.set(info.message);
       },
     });
